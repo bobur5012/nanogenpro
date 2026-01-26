@@ -9,7 +9,7 @@ class GenerationStatus(str, enum.Enum):
     PROCESSING = "processing"
     COMPLETED = "completed"
     FAILED = "failed"
-    REFUNDED = "refunded"
+    CANCELLED = "cancelled"  # User cancelled generation
 
 
 class Generation(Base):
@@ -38,6 +38,12 @@ class Generation(Base):
     
     # Cost
     credits_charged = Column(Integer, default=0)
+    
+    # Idempotency (duplicate protection)
+    idempotency_key = Column(String(64), nullable=True, index=True)
+    
+    # Timeout tracking
+    timeout_at = Column(DateTime(timezone=True), nullable=True)
     
     # Timestamps
     created_at = Column(DateTime(timezone=True), server_default=func.now())
