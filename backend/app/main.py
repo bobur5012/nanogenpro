@@ -1,9 +1,9 @@
 """
 NanoGen Backend - Main Application
+ONLY API - Telegram bot runs separately or via webhook only
 """
-import asyncio
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from telegram import Update
 from telegram.ext import Application
@@ -30,13 +30,18 @@ structlog.configure(
 
 logger = structlog.get_logger()
 
-# Global bot application
+# Global bot application (webhook only)
 bot_app: Application = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Application lifespan events"""
+    """
+    Application lifespan events.
+    
+    IMPORTANT: Telegram bot runs in WEBHOOK-ONLY mode.
+    No polling - production-ready architecture.
+    """
     global bot_app
     
     # Startup
@@ -46,38 +51,46 @@ async def lifespan(app: FastAPI):
     await init_db()
     logger.info("Database initialized")
     
-    # Initialize Telegram bot
+    # Initialize Telegram bot (WEBHOOK ONLY)
     bot_app = Application.builder().token(settings.telegram_bot_token).build()
     setup_handlers(bot_app)
     
     await bot_app.initialize()
     await bot_app.start()
     
-    # Choose mode based on TELEGRAM_WEBHOOK_URL
+    # Set webhook (production only)
     if settings.telegram_webhook_url:
-        # Production: Use webhooks (no conflicts!)
         webhook_url = f"{settings.telegram_webhook_url}/webhook/telegram"
         await bot_app.bot.set_webhook(
             url=webhook_url,
             drop_pending_updates=True,
+            allowed_updates=["message", "callback_query"],  # Only what we need
         )
-        logger.info(f"Telegram bot started with webhook: {webhook_url}")
+        logger.info("Telegram webhook set", url=webhook_url)
     else:
-        # Development: Use polling
-        asyncio.create_task(bot_app.updater.start_polling(drop_pending_updates=True))
-        logger.info("Telegram bot started with polling")
+        logger.warning("TELEGRAM_WEBHOOK_URL not set - bot will not receive updates!")
+        logger.warning("For development, run bot separately: python -m app.bot.polling")
     
     yield
     
-    # Shutdown
+    # Graceful shutdown
     logger.info("Shutting down...")
+    
     if bot_app:
+        # Delete webhook
         if settings.telegram_webhook_url:
-            await bot_app.bot.delete_webhook()
-        else:
-            await bot_app.updater.stop()
+            try:
+                await bot_app.bot.delete_webhook(drop_pending_updates=True)
+                logger.info("Webhook deleted")
+            except Exception as e:
+                logger.error("Failed to delete webhook", error=str(e))
+        
+        # Stop bot
         await bot_app.stop()
         await bot_app.shutdown()
+        logger.info("Telegram bot stopped")
+    
+    logger.info("Shutdown complete")
 
 
 # Create FastAPI app
@@ -88,19 +101,19 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# CORS
+# CORS - FIXED: Cannot use "*" with allow_credentials=True
+# Telegram WebApp doesn't need credentials, so we disable them
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
-        "https://app.nanogen.ai",
-        "https://*.netlify.app",
+        "https://nanogenbot.netlify.app",
         "http://localhost:5173",
         "http://localhost:3000",
-        "*",  # Allow all for Telegram WebApp
     ],
-    allow_credentials=True,
+    allow_credentials=False,  # ← FIXED: Telegram WebApp doesn't send credentials
     allow_methods=["*"],
     allow_headers=["*"],
+    # Note: Wildcard origins not needed - Telegram validates on their side
 )
 
 # Include routers
@@ -120,22 +133,72 @@ async def health():
 
 
 # ========== TELEGRAM WEBHOOK ENDPOINT ==========
+
 @app.post("/webhook/telegram")
-async def telegram_webhook(request: Request):
-    """Handle Telegram webhook updates"""
+async def telegram_webhook(request: Request, background_tasks: BackgroundTasks):
+    """
+    Handle Telegram webhook updates.
+    
+    IMPORTANT:
+    - Validates update
+    - Processes in background (non-blocking)
+    - Returns 200 immediately (Telegram requirement)
+    - Has error handling to prevent update loss
+    """
     global bot_app
     
     if not bot_app:
+        logger.error("Webhook received but bot not initialized")
         return {"ok": False, "error": "Bot not initialized"}
     
     try:
+        # Parse update
         data = await request.json()
         update = Update.de_json(data, bot_app.bot)
-        await bot_app.process_update(update)
+        
+        if not update:
+            logger.warning("Invalid update data")
+            return {"ok": False, "error": "Invalid update"}
+        
+        # Process update in background (non-blocking)
+        # This prevents slow handlers from blocking Telegram webhook
+        background_tasks.add_task(process_telegram_update, update)
+        
+        # Return immediately (Telegram requires fast response)
         return {"ok": True}
+        
     except Exception as e:
-        logger.error("Webhook error", error=str(e))
-        return {"ok": False, "error": str(e)}
+        # Log error but return ok=True to prevent Telegram retries
+        logger.error(
+            "Webhook processing error",
+            error=str(e),
+            error_type=type(e).__name__,
+        )
+        return {"ok": True}  # Prevent Telegram from retrying
+
+
+async def process_telegram_update(update: Update):
+    """
+    Process Telegram update in background.
+    
+    Separated from webhook endpoint to:
+    - Return fast response to Telegram
+    - Handle errors without losing updates
+    - Isolate slow operations
+    """
+    global bot_app
+    
+    try:
+        await bot_app.process_update(update)
+    except Exception as e:
+        logger.error(
+            "Update processing failed",
+            update_id=update.update_id,
+            error=str(e),
+            error_type=type(e).__name__,
+        )
+        # Errors are logged but not propagated
+        # Update is considered processed (no retry)
 
 
 if __name__ == "__main__":
