@@ -1,27 +1,48 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { TelegramUser, AppScreen } from './types';
+
+// Video Views
 import { CreateKlingView } from './views/CreateKlingView';
+import { CreateKlingImg2VideoView } from './views/CreateKlingImg2VideoView';
+import { CreateKlingO1View } from './views/CreateKlingO1View';
+import { CreateKlingTurboView } from './views/CreateKlingTurboView';
+import { CreateSeedanceView } from './views/CreateSeedanceView';
+import { CreateWanView } from './views/CreateWanView';
+import { CreateWan26View } from './views/CreateWan26View';
+import { CreateRunwayView } from './views/CreateRunwayView';
+import { CreateSoraView } from './views/CreateSoraView';
+import { CreateVeoView } from './views/CreateVeoView';
+
+// Image Views
+import { CreateGPTImageView } from './views/CreateGPTImageView';
+import { CreateImagenView } from './views/CreateImagenView';
+import { CreateNanoBananaView } from './views/CreateNanoBananaView';
+
+// Other Views
 import { ProfileView } from './views/ProfileView';
 import { PaymentView } from './views/PaymentView';
 import { ReferralView } from './views/ReferralView';
 import { DebugHub } from './views/DebugHub';
+
+// Utils
 import * as Sim from './utils/simulation';
 
-// Placeholder component for models not yet implemented
-const PlaceholderView: React.FC<{ name: string; userCredits: number; onOpenProfile: () => void }> = ({ name, userCredits, onOpenProfile }) => (
+// Placeholder for Upscale (not yet implemented)
+const UpscaleView: React.FC<{ userCredits: number; onOpenProfile: () => void }> = ({ userCredits, onOpenProfile }) => (
   <div className="min-h-screen bg-[#0B0B0E] flex flex-col items-center justify-center p-6">
     <div className="text-center space-y-4">
       <div className="w-20 h-20 bg-[#15151A] rounded-2xl border border-[#24242A] flex items-center justify-center mx-auto">
-        <span className="text-3xl">🚧</span>
+        <span className="text-3xl">🔧</span>
       </div>
-      <h1 className="text-xl font-bold text-white">{name}</h1>
-      <p className="text-[#A0A0A0] text-sm">Coming soon...</p>
-      <div className="text-[#FFD400] text-sm font-mono">Balance: {userCredits} 💎</div>
+      <h1 className="text-xl font-bold text-white">NanoScale Upscaler</h1>
+      <p className="text-[#A0A0A0] text-sm">Улучшение качества изображений</p>
+      <p className="text-[#505055] text-xs">Coming soon...</p>
+      <div className="text-[#FFD400] text-sm font-mono">Баланс: {userCredits} 💎</div>
       <button 
         onClick={onOpenProfile}
         className="mt-4 bg-[#FFD400] text-black px-6 py-3 rounded-xl font-bold text-sm"
       >
-        Go to Profile
+        Профиль
       </button>
     </div>
   </div>
@@ -101,16 +122,20 @@ const App: React.FC = () => {
       if (!tg) return;
 
       const handleBack = () => {
-          if (screen === 'payment' || screen === 'referral') {
+          // If opened payment from profile, go back to profile
+          if (screen === 'payment') {
               setScreen('profile');
               return;
           }
           
+          // Debug mode navigation
           if (isDebugSession.current && screen !== 'debug') {
               setScreen('debug');
-          } else {
-              tg.close();
+              return;
           }
+          
+          // Otherwise close the Web App (return to Telegram)
+          tg.close();
       };
 
       tg.BackButton.onClick(handleBack);
@@ -129,35 +154,42 @@ const App: React.FC = () => {
   };
 
   const renderScreen = () => {
+      const commonProps = { userCredits: credits, onOpenProfile: handleOpenProfile };
+      
       switch (screen) {
+          // Video Models
           case 'kling':
-              return <CreateKlingView userCredits={credits} onOpenProfile={handleOpenProfile} />;
+              return <CreateKlingView {...commonProps} />;
           case 'kling_img2vid':
-              return <PlaceholderView name="Kling 2.6 Pro (I2V)" userCredits={credits} onOpenProfile={handleOpenProfile} />;
+              return <CreateKlingImg2VideoView {...commonProps} />;
           case 'kling_o1':
-              return <PlaceholderView name="Kling Video O1" userCredits={credits} onOpenProfile={handleOpenProfile} />;
+              return <CreateKlingO1View {...commonProps} />;
           case 'kling_turbo':
-              return <PlaceholderView name="Kling Turbo Pro" userCredits={credits} onOpenProfile={handleOpenProfile} />;
+              return <CreateKlingTurboView {...commonProps} />;
           case 'seedance':
-              return <PlaceholderView name="Seedance 1.0" userCredits={credits} onOpenProfile={handleOpenProfile} />;
+              return <CreateSeedanceView {...commonProps} />;
           case 'wan':
-              return <PlaceholderView name="Wan 2.5" userCredits={credits} onOpenProfile={handleOpenProfile} />;
+              return <CreateWanView {...commonProps} />;
           case 'wan_2_6':
-              return <PlaceholderView name="Wan 2.6" userCredits={credits} onOpenProfile={handleOpenProfile} />;
+              return <CreateWan26View {...commonProps} />;
           case 'runway_gen4':
-              return <PlaceholderView name="Runway Gen-4 Turbo" userCredits={credits} onOpenProfile={handleOpenProfile} />;
-          case 'gpt_image':
-              return <PlaceholderView name="GPT Image 1.5" userCredits={credits} onOpenProfile={handleOpenProfile} />;
-          case 'imagen_4':
-              return <PlaceholderView name="Imagen 4.0" userCredits={credits} onOpenProfile={handleOpenProfile} />;
-          case 'nano_banana':
-              return <PlaceholderView name="Nano Banana" userCredits={credits} onOpenProfile={handleOpenProfile} />;
+              return <CreateRunwayView {...commonProps} />;
           case 'sora':
-              return <PlaceholderView name="Sora 2 Pro" userCredits={credits} onOpenProfile={handleOpenProfile} />;
+              return <CreateSoraView {...commonProps} />;
           case 'veo':
-              return <PlaceholderView name="Veo 3.1" userCredits={credits} onOpenProfile={handleOpenProfile} />;
+              return <CreateVeoView {...commonProps} />;
+              
+          // Image Models
+          case 'gpt_image':
+              return <CreateGPTImageView {...commonProps} />;
+          case 'imagen_4':
+              return <CreateImagenView {...commonProps} />;
+          case 'nano_banana':
+              return <CreateNanoBananaView {...commonProps} />;
           case 'upscale':
-              return <PlaceholderView name="NanoScale Upscaler" userCredits={credits} onOpenProfile={handleOpenProfile} />;
+              return <UpscaleView {...commonProps} />;
+              
+          // Profile & Payments
           case 'profile':
               return <ProfileView 
                         user={user} 
@@ -166,9 +198,20 @@ const App: React.FC = () => {
                         onNavigateToReferral={() => setScreen('referral')}
                      />;
           case 'referral':
-              return <ReferralView onBack={() => setScreen('profile')} userStats={Sim.getReferralStats()} userCredits={credits} />;
+              return <ReferralView 
+                        onBack={() => setScreen('profile')} 
+                        userStats={Sim.getReferralStats()} 
+                        userCredits={credits} 
+                     />;
           case 'payment':
-              return <PaymentView amount={paymentData?.amount || 0} price={paymentData?.price || 0} onBack={() => setScreen('profile')} userCredits={credits} />;
+              return <PaymentView 
+                        amount={paymentData?.amount || 0} 
+                        price={paymentData?.price || 0} 
+                        onBack={() => setScreen('profile')} 
+                        userCredits={credits} 
+                     />;
+                     
+          // Debug / Dev
           case 'debug':
           default:
               return <DebugHub onNavigate={(s) => setScreen(s as AppScreen)} />;
