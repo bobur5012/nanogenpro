@@ -1,5 +1,5 @@
 from app.schemas.user import UserCreate, UserResponse, UserBalance
-from app.schemas.generation import GenerationRequest, GenerationResponse, GenerationStatus
+from app.schemas.generation import GenerationRequest, GenerationResponse
 from app.schemas.payment import TopUpRequest, WithdrawRequest
 
 __all__ = [
@@ -8,7 +8,6 @@ __all__ = [
     "UserBalance",
     "GenerationRequest",
     "GenerationResponse",
-    "GenerationStatus",
     "TopUpRequest",
     "WithdrawRequest",
 ]

@@ -8,9 +8,9 @@ from sqlalchemy.ext.asyncio import async_engine_from_config
 
 from alembic import context
 
-# Import your models
+# Import your models (import modules, not classes, for Alembic metadata discovery)
 from app.database import Base
-from app.models import user, generation, transaction, referral
+from app.models import user, generation, transaction, referral, payment, withdrawal
 
 # this is the Alembic Config object
 config = context.config

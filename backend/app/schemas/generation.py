@@ -9,14 +9,6 @@ class GenerationType(str, Enum):
     VIDEO = "video"
 
 
-class GenerationStatus(str, Enum):
-    PENDING = "pending"
-    PROCESSING = "processing"
-    COMPLETED = "completed"
-    FAILED = "failed"
-    REFUNDED = "refunded"
-
-
 class GenerationRequest(BaseModel):
     """Request from Web App to start generation"""
     user_id: int
@@ -38,7 +30,7 @@ class GenerationRequest(BaseModel):
 
 class GenerationResponse(BaseModel):
     id: int
-    status: GenerationStatus
+    status: str  # "pending", "processing", "completed", "failed", "refunded"
     message: str
     credits_charged: int
     estimated_time: Optional[int] = None  # seconds
@@ -49,7 +41,7 @@ class GenerationResult(BaseModel):
     user_id: int
     model_name: str
     prompt: str
-    status: GenerationStatus
+    status: str  # "pending", "processing", "completed", "failed", "refunded"
     result_url: Optional[str]
     error_message: Optional[str]
     credits_charged: int
