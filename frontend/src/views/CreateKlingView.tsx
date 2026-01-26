@@ -1,0 +1,216 @@
+import React, { useState, useEffect } from 'react';
+import { Music, AlertCircle, Coins, Clock, Zap, Mic } from 'lucide-react';
+import { Button } from '../components/Button';
+import { ModelHeader } from '../components/ModelHeader';
+import { triggerHaptic, triggerSelection } from '../utils/haptics';
+
+interface CreateKlingViewProps {
+  userCredits: number;
+  onOpenProfile: () => void;
+}
+
+const PRICE_PER_SEC_NO_AUDIO = 0.0735;
+const PRICE_PER_SEC_AUDIO = 0.147;
+const CREDITS_PER_DOLLAR = 100;
+
+export const CreateKlingView: React.FC<CreateKlingViewProps> = ({ userCredits, onOpenProfile }) => {
+  const [prompt, setPrompt] = useState('');
+  const [negativePrompt, setNegativePrompt] = useState('');
+  const [duration, setDuration] = useState<5 | 10>(5);
+  const [isAudioEnabled, setIsAudioEnabled] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  useEffect(() => {
+      console.log("MODEL_SELECTED: Kling 2.6 Pro");
+  }, []);
+
+  useEffect(() => {
+      console.log("USER_BALANCE:", userCredits);
+  }, [userCredits]);
+
+  const pricePerSec = isAudioEnabled ? PRICE_PER_SEC_AUDIO : PRICE_PER_SEC_NO_AUDIO;
+  const costUSD = duration * pricePerSec;
+  const costCredits = Math.ceil(costUSD * CREDITS_PER_DOLLAR);
+  const remainingCredits = userCredits - costCredits;
+
+  const canAfford = userCredits >= costCredits;
+  const isValid = prompt.trim().length > 0;
+
+  const handleDurationChange = (d: 5 | 10) => {
+      if (duration !== d) {
+          triggerSelection();
+          setDuration(d);
+      }
+  };
+
+  const toggleAudio = () => {
+      triggerSelection();
+      setIsAudioEnabled(!isAudioEnabled);
+  };
+
+  const handleSubmit = () => {
+    if (!canAfford || !isValid) return;
+
+    setIsSubmitting(true);
+    triggerHaptic('medium');
+    
+    setTimeout(() => {
+        const payload = {
+            type: 'video_gen',
+            payload: {
+                model: 'kling-2.6-pro',
+                prompt,
+                negative_prompt: negativePrompt,
+                duration: `${duration}s`,
+                audio: isAudioEnabled,
+                cost: costCredits
+            }
+        };
+        window.Telegram.WebApp.sendData(JSON.stringify(payload));
+    }, 1500);
+  };
+
+  return (
+    <div className="flex flex-col h-screen bg-[#0B0B0E] animate-fade-in">
+      <ModelHeader
+        modelName="Kling 2.6 Pro"
+        subtitle="Text to Video"
+        badge={<span className="bg-[#FFD400] text-black text-[10px] px-1.5 py-0.5 rounded font-bold">NEW</span>}
+        userCredits={userCredits}
+        canAfford={canAfford}
+        onOpenProfile={onOpenProfile}
+      />
+
+      <div className="flex-1 overflow-y-auto p-5 space-y-6 pb-20">
+        
+        {/* Settings Section */}
+        <div className="space-y-4">
+            <h3 className="text-[#A0A0A0] text-xs font-bold uppercase tracking-wider ml-1">Настройки генерации</h3>
+            
+            <div className="grid grid-cols-2 gap-3">
+                 {/* Duration */}
+                 <div className="bg-[#15151A] border border-[#24242A] rounded-xl p-1 flex">
+                     <button 
+                        onClick={() => handleDurationChange(5)} 
+                        className={`flex-1 rounded-lg text-xs font-bold py-2 transition-all ${duration === 5 ? 'bg-[#24242A] text-white shadow-sm' : 'text-[#A0A0A0]'}`}
+                     >
+                         5 сек
+                     </button>
+                     <button 
+                        onClick={() => handleDurationChange(10)} 
+                        className={`flex-1 rounded-lg text-xs font-bold py-2 transition-all ${duration === 10 ? 'bg-[#24242A] text-white shadow-sm' : 'text-[#A0A0A0]'}`}
+                     >
+                         10 сек
+                     </button>
+                 </div>
+
+                 {/* Audio Toggle */}
+                 <button 
+                    onClick={toggleAudio}
+                    className={`border rounded-xl px-4 flex items-center justify-between transition-all ${
+                        isAudioEnabled 
+                        ? 'bg-[#FFD400]/10 border-[#FFD400] text-[#FFD400]' 
+                        : 'bg-[#15151A] border-[#24242A] text-[#A0A0A0]'
+                    }`}
+                 >
+                     <div className="flex items-center gap-2">
+                         {isAudioEnabled ? <Mic size={16} /> : <Music size={16} />}
+                         <span className="text-xs font-bold">Аудио</span>
+                     </div>
+                     <span className="text-[10px] font-bold">{isAudioEnabled ? 'ВКЛ' : 'ВЫКЛ'}</span>
+                 </button>
+            </div>
+
+            {/* Price Info */}
+            <div className="flex items-center justify-between px-1">
+                <div className="flex items-center gap-1.5 text-[10px] text-[#A0A0A0]">
+                    <Clock size={10} />
+                    <span>Цена за секунду:</span>
+                </div>
+                <div className="text-xs font-mono font-bold text-white">
+                    ${pricePerSec.toFixed(4)}
+                </div>
+            </div>
+        </div>
+
+        {/* Prompt Section */}
+        <div className="space-y-4">
+            <div className="space-y-2">
+                <label className="text-xs font-bold text-[#A0A0A0] uppercase tracking-wider ml-1">Промпт</label>
+                <textarea
+                    value={prompt}
+                    onChange={(e) => setPrompt(e.target.value)}
+                    maxLength={5000}
+                    placeholder={isAudioEnabled ? "Опишите сцену и звуковое сопровождение..." : "Детально опишите сцену..."}
+                    className="w-full h-32 bg-[#15151A] border border-[#24242A] rounded-2xl p-4 text-white placeholder-[#505055] focus:border-[#FFD400] focus:outline-none transition-all resize-none text-sm leading-relaxed"
+                />
+                <div className="flex justify-end px-1">
+                    <span className="text-[10px] text-[#505055] font-mono">{prompt.length}/5000</span>
+                </div>
+            </div>
+
+            <div className="space-y-2">
+                <label className="text-xs font-bold text-[#505055] uppercase tracking-wider ml-1">Негативный промпт (Опционально)</label>
+                <textarea
+                    value={negativePrompt}
+                    onChange={(e) => setNegativePrompt(e.target.value)}
+                    placeholder="Размыто, низкое качество, искажения..."
+                    className="w-full h-20 bg-[#15151A] border border-[#24242A] rounded-xl p-3 text-white placeholder-[#505055] focus:border-[#FFD400]/50 focus:outline-none transition-all resize-none text-xs"
+                />
+            </div>
+        </div>
+
+        {/* Cost Preview Section */}
+        <div className="bg-[#15151A] border border-[#24242A] rounded-2xl p-4 space-y-3">
+             <div className="flex justify-between items-center text-xs">
+                 <span className="text-[#A0A0A0]">Расчет</span>
+                 <span className="font-mono text-[#A0A0A0]">{duration}с × ${pricePerSec}</span>
+             </div>
+             <div className="h-px bg-[#24242A]" />
+             <div className="flex justify-between items-center">
+                 <div className="flex items-center gap-2">
+                     <Coins size={16} className={canAfford ? 'text-[#FFD400]' : 'text-[#FF4D4D]'} />
+                     <span className="text-sm font-bold text-white">Итого</span>
+                 </div>
+                 <div className="flex flex-col items-end">
+                     <span className="text-lg font-bold text-white">{costCredits} 💎</span>
+                     <span className="text-[10px] text-[#505055] font-mono">(${costUSD.toFixed(3)})</span>
+                 </div>
+             </div>
+             {canAfford ? (
+                 <div className="flex justify-between items-center text-[10px] bg-black/20 p-2 rounded-lg">
+                     <span className="text-[#A0A0A0]">Остаток</span>
+                     <span className="text-white font-mono">{remainingCredits} 💎</span>
+                 </div>
+             ) : (
+                 <div className="flex items-center gap-2 text-[#FF4D4D] text-[10px] bg-[#2A1515] p-2 rounded-lg border border-[#441111]">
+                    <AlertCircle size={12} />
+                    <span>Недостаточно средств</span>
+                </div>
+             )}
+        </div>
+      </div>
+
+      {/* Footer Action */}
+      <div className="p-5 border-t border-[#24242A] bg-[#0B0B0E]">
+        <Button 
+            fullWidth 
+            onClick={handleSubmit} 
+            disabled={!isValid || !canAfford}
+            loading={isSubmitting}
+        >
+             {isSubmitting ? (
+                 <span className="flex items-center gap-2">
+                     Генерация с Kling...
+                 </span>
+             ) : (
+                 <div className="flex items-center gap-2 justify-center">
+                     <Zap size={18} className={canAfford ? "text-black" : "text-[#FF4D4D]"} />
+                     <span>{canAfford ? 'Сгенерировать видео' : 'Пополнить баланс'}</span>
+                 </div>
+             )}
+        </Button>
+      </div>
+    </div>
+  );
+};

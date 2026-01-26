@@ -1,0 +1,146 @@
+# ===============================
+# Environment & Secrets
+# ===============================
+.env
+.env.local
+.env.*.local
+*.env
+!.env.example
+!env.example
+
+# ===============================
+# Python
+# ===============================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+venv/
+ENV/
+env/
+.venv/
+
+# PyInstaller
+*.manifest
+*.spec
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.pytest_cache/
+pytest_debug.log
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# ===============================
+# Node.js / Frontend
+# ===============================
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+.pnpm-store/
+
+# Build output
+dist/
+dist-ssr/
+*.local
+.output/
+.nuxt/
+.next/
+
+# ===============================
+# IDE & Editors
+# ===============================
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+.idea/
+*.swp
+*.swo
+*~
+*.sublime-workspace
+*.sublime-project
+
+# ===============================
+# OS Files
+# ===============================
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+Desktop.ini
+
+# ===============================
+# Logs
+# ===============================
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# ===============================
+# Database
+# ===============================
+*.sqlite
+*.sqlite3
+*.db
+
+# ===============================
+# Misc
+# ===============================
+*.local
+.temp/
+.tmp/
+temp/
+tmp/
+
+# Uploaded files
+uploads/
+media/
+
+# Secrets and credentials
+credentials.json
+*.pem
+*.key
+secrets/
