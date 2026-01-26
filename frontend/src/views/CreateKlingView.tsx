@@ -9,9 +9,10 @@ interface CreateKlingViewProps {
   onOpenProfile: () => void;
 }
 
-const PRICE_PER_SEC_NO_AUDIO = 0.0735;
-const PRICE_PER_SEC_AUDIO = 0.147;
-const CREDITS_PER_DOLLAR = 100;
+// Pricing in UZS (3x markup applied)
+const PRICE_PER_SEC_NO_AUDIO = 22050;  // ~$0.0735 * 3 * 100 credits
+const PRICE_PER_SEC_AUDIO = 44100;     // ~$0.147 * 3 * 100 credits
+const CREDITS_PER_UZS = 1000;          // 1000 UZS = 1 credit
 
 export const CreateKlingView: React.FC<CreateKlingViewProps> = ({ userCredits, onOpenProfile }) => {
   const [prompt, setPrompt] = useState('');
@@ -29,8 +30,8 @@ export const CreateKlingView: React.FC<CreateKlingViewProps> = ({ userCredits, o
   }, [userCredits]);
 
   const pricePerSec = isAudioEnabled ? PRICE_PER_SEC_AUDIO : PRICE_PER_SEC_NO_AUDIO;
-  const costUSD = duration * pricePerSec;
-  const costCredits = Math.ceil(costUSD * CREDITS_PER_DOLLAR);
+  const costUZS = duration * pricePerSec;
+  const costCredits = Math.ceil(costUZS / CREDITS_PER_UZS);
   const remainingCredits = userCredits - costCredits;
 
   const canAfford = userCredits >= costCredits;
@@ -63,12 +64,15 @@ export const CreateKlingView: React.FC<CreateKlingViewProps> = ({ userCredits, o
                 negative_prompt: negativePrompt,
                 duration: `${duration}s`,
                 audio: isAudioEnabled,
-                cost: costCredits
+                cost_credits: costCredits,
+                cost_uzs: costUZS
             }
         };
         window.Telegram.WebApp.sendData(JSON.stringify(payload));
     }, 1500);
   };
+
+  const formatUZS = (amount: number) => amount.toLocaleString('ru-RU');
 
   return (
     <div className="flex flex-col h-screen bg-[#0B0B0E] animate-fade-in">
@@ -128,7 +132,7 @@ export const CreateKlingView: React.FC<CreateKlingViewProps> = ({ userCredits, o
                     <span>Цена за секунду:</span>
                 </div>
                 <div className="text-xs font-mono font-bold text-white">
-                    ${pricePerSec.toFixed(4)}
+                    {formatUZS(pricePerSec)} UZS
                 </div>
             </div>
         </div>
@@ -164,7 +168,7 @@ export const CreateKlingView: React.FC<CreateKlingViewProps> = ({ userCredits, o
         <div className="bg-[#15151A] border border-[#24242A] rounded-2xl p-4 space-y-3">
              <div className="flex justify-between items-center text-xs">
                  <span className="text-[#A0A0A0]">Расчет</span>
-                 <span className="font-mono text-[#A0A0A0]">{duration}с × ${pricePerSec}</span>
+                 <span className="font-mono text-[#A0A0A0]">{duration}с × {formatUZS(pricePerSec)}</span>
              </div>
              <div className="h-px bg-[#24242A]" />
              <div className="flex justify-between items-center">
@@ -174,7 +178,7 @@ export const CreateKlingView: React.FC<CreateKlingViewProps> = ({ userCredits, o
                  </div>
                  <div className="flex flex-col items-end">
                      <span className="text-lg font-bold text-white">{costCredits} 💎</span>
-                     <span className="text-[10px] text-[#505055] font-mono">(${costUSD.toFixed(3)})</span>
+                     <span className="text-[10px] text-[#505055] font-mono">({formatUZS(costUZS)} UZS)</span>
                  </div>
              </div>
              {canAfford ? (

@@ -51,8 +51,8 @@ export type WebAppPayload =
   | { type: 'image_gen'; payload: any }
   | { type: 'upscale'; payload: { scale: string; image_url?: string } }
   | { type: 'buy_credits'; payload: { amount: number; price: number; method: 'card' } }
-  | { type: 'payment_confirm'; payload: { amount: number; screenshot: string } }
-  | { type: 'withdraw_request'; payload: { amount: number; card: string } };
+  | { type: 'payment_confirm'; payload: { credits: number; amount_uzs: number; screenshot: string } }
+  | { type: 'withdraw_request'; payload: { amount_uzs: number; card_number: string } };
 
 // Jobs/History
 export interface Job {
@@ -66,13 +66,33 @@ export interface Job {
     resultUrl?: string;
 }
 
-// Stats
-export interface ReferralStats {
-    invitedCount: number;
-    activeCount: number;
-    totalEarnings: number;
-    balance: number; // Available for withdraw
-    savedCard?: string;
+// Partner Stats (from API)
+export interface PartnerStats {
+    referral_code: string;
+    referral_link: string;
+    total_earned: number;         // Ваш доход (lifetime)
+    available_balance: number;    // Баланс партнёра (для вывода)
+    total_withdrawn: number;      // Всего выведено
+    referrals_total: number;      // Всего рефералов
+    referrals_active: number;     // Активных (с 1+ платежом)
+    saved_card: string | null;
+    saved_card_type: string | null;
+    min_withdrawal: number;
+    commission_percent: number;
+}
+
+// Credit Package
+export interface CreditPackage {
+    credits: number;
+    price_uzs: number;
+    discount: number;
+}
+
+// Payment Card Info
+export interface PaymentCard {
+    number: string;
+    holder: string;
+    type: string;
 }
 
 declare global {
@@ -92,6 +112,8 @@ declare global {
         close: () => void;
         sendData: (data: string) => void;
         showPopup: (params: any, callback?: (id: string) => void) => void;
+        openTelegramLink: (url: string) => void;  // For native share
+        openLink: (url: string, options?: { try_instant_view?: boolean }) => void;
         BackButton: {
             isVisible: boolean;
             show: () => void;

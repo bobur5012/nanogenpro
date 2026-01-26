@@ -1,27 +1,95 @@
-import React, { useState, useRef } from 'react';
-import { Copy, CreditCard, Upload, Check, AlertCircle } from 'lucide-react';
+import React, { useState, useRef, useEffect } from 'react';
+import { Copy, Upload, Check, AlertCircle, Loader2, CreditCard, ChevronRight } from 'lucide-react';
 import { ModelHeader } from '../components/ModelHeader';
 import { triggerHaptic, triggerNotification } from '../utils/haptics';
 
 interface PaymentViewProps {
-    amount: number;
-    price: number;
+    amount: number;       // Credits to buy
+    price: number;        // Price in UZS
     onBack: () => void;
     userCredits: number;
 }
 
-const CARD_NUMBER = "8600 0000 0000 0000";
-const CARD_HOLDER = "NANOGEN SERVICE";
+interface CreditPackage {
+    credits: number;
+    price_uzs: number;
+    discount: number;
+}
 
-export const PaymentView: React.FC<PaymentViewProps> = ({ amount, price, onBack, userCredits }) => {
+interface CardInfo {
+    number: string;
+    holder: string;
+    type: string;
+}
+
+const API_URL = import.meta.env.VITE_API_URL || '';
+
+// UZCARD Logo SVG
+const UzcardLogo = () => (
+    <svg width="60" height="20" viewBox="0 0 120 40" fill="none">
+        <rect width="120" height="40" rx="4" fill="#1E40AF"/>
+        <text x="10" y="28" fill="white" fontSize="14" fontWeight="bold" fontFamily="Arial">UZCARD</text>
+    </svg>
+);
+
+export const PaymentView: React.FC<PaymentViewProps> = ({ amount: initialAmount, price: initialPrice, onBack, userCredits }) => {
+    const [packages, setPackages] = useState<CreditPackage[]>([]);
+    const [card, setCard] = useState<CardInfo | null>(null);
+    const [selectedPackage, setSelectedPackage] = useState<CreditPackage | null>(null);
     const [screenshot, setScreenshot] = useState<string | null>(null);
     const [isSubmitting, setIsSubmitting] = useState(false);
+    const [submitSuccess, setSubmitSuccess] = useState(false);
+    const [copied, setCopied] = useState(false);
+    const [loading, setLoading] = useState(true);
+    
     const fileInputRef = useRef<HTMLInputElement>(null);
+    const userId = window.Telegram?.WebApp?.initDataUnsafe?.user?.id;
+
+    useEffect(() => {
+        fetchPackages();
+    }, []);
+
+    const fetchPackages = async () => {
+        try {
+            const response = await fetch(`${API_URL}/api/user/packages`);
+            if (!response.ok) throw new Error('Failed to fetch packages');
+            const data = await response.json();
+            setPackages(data.packages);
+            setCard(data.card);
+            
+            // Select matching or first package
+            if (initialAmount && initialPrice) {
+                const match = data.packages.find((p: CreditPackage) => p.credits === initialAmount);
+                setSelectedPackage(match || data.packages[0]);
+            } else {
+                setSelectedPackage(data.packages[0]);
+            }
+        } catch (e) {
+            // Fallback packages
+            setPackages([
+                { credits: 100, price_uzs: 50000, discount: 0 },
+                { credits: 500, price_uzs: 225000, discount: 10 },
+                { credits: 1000, price_uzs: 400000, discount: 20 },
+                { credits: 5000, price_uzs: 1750000, discount: 30 },
+            ]);
+            setCard({
+                number: "8600 3304 8588 5154",
+                holder: "Botirov Bobur",
+                type: "UZCARD"
+            });
+            setSelectedPackage({ credits: 100, price_uzs: 50000, discount: 0 });
+        } finally {
+            setLoading(false);
+        }
+    };
 
     const handleCopy = () => {
+        if (!card) return;
         triggerHaptic('light');
-        navigator.clipboard.writeText(CARD_NUMBER.replace(/\s/g, ''));
+        navigator.clipboard.writeText(card.number.replace(/\s/g, ''));
+        setCopied(true);
         triggerNotification('success');
+        setTimeout(() => setCopied(false), 2000);
     };
 
     const handleUploadClick = () => {
@@ -32,6 +100,11 @@ export const PaymentView: React.FC<PaymentViewProps> = ({ amount, price, onBack,
     const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
         if (file) {
+            if (file.size > 5 * 1024 * 1024) {
+                triggerNotification('error');
+                return;
+            }
+            
             const reader = new FileReader();
             reader.onload = (ev) => {
                 if (ev.target?.result) {
@@ -43,109 +116,259 @@ export const PaymentView: React.FC<PaymentViewProps> = ({ amount, price, onBack,
         }
     };
 
-    const handleSubmit = () => {
-        if (!screenshot) return;
+    const handleSubmit = async () => {
+        if (!screenshot || !selectedPackage || !userId) return;
         
         setIsSubmitting(true);
         triggerHaptic('medium');
 
-        setTimeout(() => {
-            const payload = {
-                type: 'payment_confirm',
-                payload: {
-                    amount,
-                    screenshot: 'base64_screenshot_truncated'
-                }
-            };
-            window.Telegram.WebApp.sendData(JSON.stringify(payload));
-        }, 1500);
+        try {
+            const response = await fetch(`${API_URL}/api/user/topup`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    user_id: userId,
+                    credits: selectedPackage.credits,
+                    amount_uzs: selectedPackage.price_uzs,
+                    screenshot_base64: screenshot,
+                }),
+            });
+
+            if (!response.ok) {
+                const error = await response.json();
+                throw new Error(error.detail || 'Ошибка отправки');
+            }
+
+            setSubmitSuccess(true);
+            triggerNotification('success');
+
+        } catch (e: any) {
+            triggerNotification('error');
+        } finally {
+            setIsSubmitting(false);
+        }
     };
+
+    if (loading) {
+        return (
+            <div className="min-h-screen bg-[#0B0B0E] flex items-center justify-center">
+                <Loader2 className="w-8 h-8 text-[#FFD400] animate-spin" />
+            </div>
+        );
+    }
+
+    if (submitSuccess) {
+        return (
+            <div className="min-h-screen bg-[#0B0B0E] flex flex-col">
+                <ModelHeader
+                    modelName="Оплата"
+                    userCredits={userCredits}
+                    canAfford={true}
+                    onOpenProfile={onBack}
+                />
+                <div className="flex-1 flex flex-col items-center justify-center p-6 space-y-6">
+                    <div className="w-20 h-20 bg-[#22C55E]/10 rounded-full flex items-center justify-center">
+                        <Check size={40} className="text-[#22C55E]" />
+                    </div>
+                    <div className="text-center space-y-2">
+                        <h2 className="text-xl font-bold text-white">Заявка отправлена!</h2>
+                        <p className="text-sm text-[#A0A0A0]">
+                            Ожидайте подтверждения оператором.<br/>
+                            Обычно это занимает 5-30 минут.
+                        </p>
+                    </div>
+                    <button
+                        onClick={onBack}
+                        className="bg-[#FFD400] text-black px-8 py-3 rounded-xl font-bold text-sm active:scale-95 transition-transform"
+                    >
+                        Вернуться в профиль
+                    </button>
+                </div>
+            </div>
+        );
+    }
 
     return (
         <div className="min-h-screen bg-[#0B0B0E] flex flex-col animate-slide-in">
             <input type="file" ref={fileInputRef} onChange={handleFileChange} className="hidden" accept="image/*" />
 
             <ModelHeader
-                modelName="Оплата"
+                modelName="Пополнение"
                 userCredits={userCredits}
                 canAfford={true}
                 onOpenProfile={onBack}
             />
 
-            <div className="flex-1 p-5 space-y-6 overflow-y-auto">
+            <div className="flex-1 p-5 space-y-6 overflow-y-auto pb-24">
                 
-                {/* 1. Summary */}
-                <div className="bg-[#15151A] border border-[#24242A] rounded-2xl p-5 text-center space-y-1">
-                    <span className="text-[#A0A0A0] text-xs font-bold uppercase">Сумма к оплате</span>
-                    <div className="text-3xl font-bold text-white">{price.toLocaleString()} UZS</div>
-                    <div className="text-[#FFD400] text-sm font-bold mt-1">Пополнение на {amount} кредитов</div>
+                {/* 1. Package Selection */}
+                <div className="space-y-3">
+                    <label className="text-[#A0A0A0] text-xs font-bold uppercase ml-1">Выберите пакет</label>
+                    <div className="grid grid-cols-2 gap-3">
+                        {packages.map((pkg) => (
+                            <button
+                                key={pkg.credits}
+                                onClick={() => {
+                                    triggerHaptic('light');
+                                    setSelectedPackage(pkg);
+                                }}
+                                className={`relative p-4 rounded-xl border-2 transition-all active:scale-95 ${
+                                    selectedPackage?.credits === pkg.credits 
+                                        ? 'border-[#FFD400] bg-[#FFD400]/5' 
+                                        : 'border-[#24242A] bg-[#15151A] hover:border-[#3A3A40]'
+                                }`}
+                            >
+                                {pkg.discount > 0 && (
+                                    <div className="absolute -top-2 -right-2 bg-[#22C55E] text-white text-[10px] font-bold px-2 py-0.5 rounded-full">
+                                        -{pkg.discount}%
+                                    </div>
+                                )}
+                                <div className="text-2xl font-bold text-white">{pkg.credits}</div>
+                                <div className="text-[10px] text-[#A0A0A0] uppercase">кредитов</div>
+                                <div className="text-sm font-bold text-[#FFD400] mt-2">
+                                    {pkg.price_uzs.toLocaleString()} UZS
+                                </div>
+                            </button>
+                        ))}
+                    </div>
                 </div>
 
-                {/* 2. Card Details */}
-                <div className="space-y-2">
-                    <label className="text-[#A0A0A0] text-xs font-bold uppercase ml-1">Реквизиты карты</label>
-                    <div className="bg-gradient-to-br from-[#24242A] to-[#1A1A1F] rounded-2xl p-5 border border-[#24242A] relative overflow-hidden">
-                        <div className="absolute top-0 right-0 p-4 opacity-10">
-                            <CreditCard size={100} />
-                        </div>
-                        <div className="relative z-10 space-y-6">
-                            <div>
-                                <span className="text-[#505055] text-[10px] font-bold uppercase block mb-1">Номер карты (UZCARD / HUMO)</span>
-                                <div className="flex items-center gap-3">
-                                    <span className="text-xl font-mono text-white tracking-wider">{CARD_NUMBER}</span>
-                                    <button onClick={handleCopy} className="text-[#FFD400] p-1 active:scale-90 transition-transform">
-                                        <Copy size={18} />
-                                    </button>
+                {/* 2. Payment Card - Beautiful Design */}
+                {card && (
+                    <div className="space-y-3">
+                        <label className="text-[#A0A0A0] text-xs font-bold uppercase ml-1">Карта для оплаты</label>
+                        
+                        {/* Card Design */}
+                        <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-[#1E40AF] via-[#1E3A8A] to-[#172554] p-5 shadow-xl">
+                            {/* Background Pattern */}
+                            <div className="absolute inset-0 opacity-10">
+                                <div className="absolute top-0 right-0 w-40 h-40 bg-white rounded-full blur-3xl transform translate-x-20 -translate-y-20" />
+                                <div className="absolute bottom-0 left-0 w-32 h-32 bg-white rounded-full blur-3xl transform -translate-x-16 translate-y-16" />
+                            </div>
+                            
+                            {/* Card Content */}
+                            <div className="relative z-10 space-y-4">
+                                {/* Logo */}
+                                <div className="flex justify-between items-start">
+                                    <UzcardLogo />
+                                    <div className="text-white/60 text-[10px] font-mono">
+                                        {card.type}
+                                    </div>
+                                </div>
+                                
+                                {/* Card Number */}
+                                <div className="pt-4">
+                                    <div className="flex items-center gap-3">
+                                        <span className="text-2xl font-mono text-white tracking-widest">
+                                            {card.number}
+                                        </span>
+                                        <button 
+                                            onClick={handleCopy} 
+                                            className={`p-2 rounded-lg transition-all active:scale-90 ${
+                                                copied ? 'bg-[#22C55E]/20 text-[#22C55E]' : 'bg-white/10 text-white hover:bg-white/20'
+                                            }`}
+                                        >
+                                            {copied ? <Check size={18} /> : <Copy size={18} />}
+                                        </button>
+                                    </div>
+                                </div>
+                                
+                                {/* Holder */}
+                                <div className="pt-2">
+                                    <div className="text-white/40 text-[10px] uppercase tracking-wider mb-1">Получатель</div>
+                                    <div className="text-white font-bold tracking-wide">{card.holder}</div>
                                 </div>
                             </div>
-                            <div>
-                                <span className="text-[#505055] text-[10px] font-bold uppercase block mb-1">Получатель</span>
-                                <span className="text-sm font-bold text-white tracking-widest">{CARD_HOLDER}</span>
+                        </div>
+                        
+                        {/* Important Notice */}
+                        <div className="flex items-start gap-3 bg-[#2A1515] p-4 rounded-xl border border-[#441111]">
+                            <AlertCircle size={18} className="text-[#FF4D4D] shrink-0 mt-0.5" />
+                            <div className="text-xs text-[#FF4D4D] leading-relaxed">
+                                <strong>Важно!</strong> В комментарии к платежу укажите ваш ID: 
+                                <span className="inline-block font-mono bg-[#441111] px-2 py-0.5 rounded ml-1 text-white">
+                                    {userId || 'N/A'}
+                                </span>
                             </div>
                         </div>
                     </div>
-                    <div className="flex items-start gap-2 bg-[#2A1515] p-3 rounded-xl border border-[#441111]">
-                        <AlertCircle size={16} className="text-[#FF4D4D] shrink-0 mt-0.5" />
-                        <p className="text-[10px] text-[#FF4D4D] leading-tight">
-                            Внимание! В комментарии к платежу обязательно укажите ваш ID: 
-                            <span className="font-mono bg-[#441111] px-1 rounded ml-1 text-white">{window.Telegram?.WebApp?.initDataUnsafe?.user?.id || 'N/A'}</span>
-                        </p>
-                    </div>
-                </div>
+                )}
 
-                {/* 3. Confirmation */}
-                <div className="space-y-2">
-                    <label className="text-[#A0A0A0] text-xs font-bold uppercase ml-1">Подтверждение</label>
+                {/* 3. Screenshot Upload */}
+                <div className="space-y-3">
+                    <label className="text-[#A0A0A0] text-xs font-bold uppercase ml-1">Скриншот чека</label>
                     <div 
                         onClick={handleUploadClick}
-                        className={`w-full h-32 border-2 border-dashed rounded-2xl flex flex-col items-center justify-center gap-3 cursor-pointer transition-all ${screenshot ? 'border-[#22C55E] bg-[#22C55E]/5' : 'border-[#24242A] bg-[#15151A] hover:bg-[#1A1A1F]'}`}
+                        className={`w-full border-2 border-dashed rounded-2xl flex flex-col items-center justify-center cursor-pointer transition-all active:scale-[0.98] ${
+                            screenshot 
+                                ? 'border-[#22C55E] bg-[#22C55E]/5 p-3' 
+                                : 'border-[#24242A] bg-[#15151A] hover:bg-[#1A1A1F] hover:border-[#3A3A40] p-8'
+                        }`}
                     >
                         {screenshot ? (
-                            <div className="flex flex-col items-center gap-1 text-[#22C55E]">
-                                <Check size={32} />
-                                <span className="text-xs font-bold">Скриншот загружен</span>
-                                <span className="text-[10px] opacity-70">Нажмите, чтобы заменить</span>
+                            <div className="relative w-full">
+                                <img 
+                                    src={screenshot} 
+                                    alt="Чек" 
+                                    className="w-full h-48 object-cover rounded-xl"
+                                />
+                                <div className="absolute inset-0 bg-black/40 rounded-xl flex items-center justify-center opacity-0 hover:opacity-100 transition-opacity">
+                                    <span className="text-white text-sm font-bold bg-black/50 px-4 py-2 rounded-lg">
+                                        Заменить
+                                    </span>
+                                </div>
+                                <div className="absolute top-2 right-2 bg-[#22C55E] text-white p-1.5 rounded-full">
+                                    <Check size={16} />
+                                </div>
                             </div>
                         ) : (
                             <>
-                                <div className="w-10 h-10 rounded-full bg-[#24242A] flex items-center justify-center text-white">
-                                    <Upload size={20} />
+                                <div className="w-14 h-14 rounded-full bg-[#24242A] flex items-center justify-center text-white mb-3">
+                                    <Upload size={24} />
                                 </div>
-                                <span className="text-xs font-bold text-[#A0A0A0]">Загрузить скриншот чека</span>
+                                <span className="text-sm font-bold text-white">Загрузить скриншот</span>
+                                <span className="text-[10px] text-[#505055] mt-1">После перевода загрузите скриншот чека</span>
                             </>
                         )}
                     </div>
                 </div>
+
+                {/* Summary */}
+                {selectedPackage && (
+                    <div className="bg-[#15151A] border border-[#24242A] rounded-2xl p-4">
+                        <div className="flex justify-between items-center">
+                            <span className="text-sm text-[#A0A0A0]">Итого к оплате:</span>
+                            <div className="text-right">
+                                <div className="text-xl font-bold text-white">
+                                    {selectedPackage.price_uzs.toLocaleString()} UZS
+                                </div>
+                                <div className="text-xs text-[#FFD400]">
+                                    +{selectedPackage.credits} кредитов
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                )}
             </div>
 
             {/* Footer */}
-            <div className="p-5 border-t border-[#24242A] bg-[#0B0B0E]">
+            <div className="fixed bottom-0 left-0 right-0 p-5 border-t border-[#24242A] bg-[#0B0B0E]">
                 <button
                     onClick={handleSubmit}
                     disabled={!screenshot || isSubmitting}
                     className="w-full bg-[#FF4D4D] hover:bg-[#FF6B6B] disabled:bg-[#2A1515] disabled:text-[#505055] disabled:cursor-not-allowed active:scale-95 transition-all rounded-xl px-5 py-4 flex items-center justify-center gap-2 text-white font-bold text-sm shadow-lg"
                 >
-                    {isSubmitting ? 'Отправка...' : 'Отправить на проверку'}
+                    {isSubmitting ? (
+                        <>
+                            <Loader2 size={18} className="animate-spin" />
+                            Отправка...
+                        </>
+                    ) : (
+                        <>
+                            <ChevronRight size={18} />
+                            Отправить на проверку
+                        </>
+                    )}
                 </button>
             </div>
         </div>

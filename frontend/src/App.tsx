@@ -200,7 +200,6 @@ const App: React.FC = () => {
           case 'referral':
               return <ReferralView 
                         onBack={() => setScreen('profile')} 
-                        userStats={Sim.getReferralStats()} 
                         userCredits={credits} 
                      />;
           case 'payment':

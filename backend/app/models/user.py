@@ -1,3 +1,6 @@
+"""
+User Model with full referral program support
+"""
 from sqlalchemy import Column, BigInteger, String, Integer, DateTime, Boolean
 from sqlalchemy.sql import func
 from app.database import Base
@@ -12,27 +15,44 @@ class User(Base):
     last_name = Column(String(255), nullable=True)
     language_code = Column(String(10), default="ru")
     
-    # Balance
+    # Balance (credits for generation)
     credits = Column(Integer, default=10)  # Starting bonus
     
-    # Referral
-    referrer_id = Column(BigInteger, nullable=True)
+    # ========== REFERRAL PROGRAM ==========
+    # Who referred this user (set ONCE, never changes)
+    referrer_id = Column(BigInteger, nullable=True, index=True)
+    
+    # User's own referral code (auto-generated)
     referral_code = Column(String(32), unique=True, nullable=True)
-    referral_earnings = Column(Integer, default=0)  # Total earned from referrals
-    referral_balance = Column(Integer, default=0)   # Available for withdrawal
     
-    # Payment
-    saved_card = Column(String(20), nullable=True)
+    # Partner earnings (in UZS)
+    referral_total_earned = Column(Integer, default=0)    # Lifetime total earned
+    referral_balance = Column(Integer, default=0)         # Available for withdrawal
+    referral_withdrawn = Column(Integer, default=0)       # Total withdrawn
     
-    # Stats
+    # Partner stats
+    referrals_count = Column(Integer, default=0)          # Total referred users
+    referrals_active = Column(Integer, default=0)         # Users with at least 1 payment
+    
+    # ========== PAYMENT ==========
+    # Saved withdrawal card
+    saved_card_number = Column(String(20), nullable=True)
+    saved_card_type = Column(String(10), nullable=True)   # uzcard / humo
+    
+    # Total user spending (in UZS)
+    total_spent_uzs = Column(Integer, default=0)
+    
+    # ========== STATS ==========
     total_generations = Column(Integer, default=0)
-    total_spent = Column(Integer, default=0)
+    total_spent_credits = Column(Integer, default=0)
     
-    # Status
+    # ========== STATUS ==========
     is_banned = Column(Boolean, default=False)
     is_premium = Column(Boolean, default=False)
+    is_admin = Column(Boolean, default=False)
     
-    # Timestamps
+    # ========== TIMESTAMPS ==========
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
     last_active_at = Column(DateTime(timezone=True), server_default=func.now())
+    first_payment_at = Column(DateTime(timezone=True), nullable=True)  # When became "active"

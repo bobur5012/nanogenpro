@@ -1,190 +1,315 @@
 """
 Admin API endpoints
+Handles payment/withdrawal confirmations from Telegram admin channel
 """
-from fastapi import APIRouter, Depends, HTTPException, Header
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, desc
+from pydantic import BaseModel
+from typing import Optional
 
 from app.database import get_db
-from app.models import Transaction, TransactionType, User
-from app.services.balance import balance_service
+from app.services.payment import payment_service
 from app.services.telegram import telegram_service
-from app.config import settings
+from app.services.referral import referral_service
+from app.models import User, Payment, Withdrawal, PaymentStatus, WithdrawalStatus
 import structlog
 
 logger = structlog.get_logger()
 router = APIRouter(prefix="/api/admin", tags=["Admin"])
 
 
-async def verify_admin(x_admin_key: str = Header(...)):
-    """Simple admin auth via header"""
-    if x_admin_key != settings.secret_key:
-        raise HTTPException(status_code=403, detail="Invalid admin key")
-    return True
+# ========== SCHEMAS ==========
+
+class PaymentActionRequest(BaseModel):
+    payment_id: int
+    admin_id: int
+    action: str  # "approve" or "reject"
+    reason: Optional[str] = None
 
 
-@router.get("/pending-payments")
-async def get_pending_payments(
+class WithdrawalActionRequest(BaseModel):
+    withdrawal_id: int
+    admin_id: int
+    action: str  # "approve" or "reject"
+    reason: Optional[str] = None
+
+
+class AdminStatsResponse(BaseModel):
+    total_users: int
+    active_users: int
+    pending_payments: int
+    pending_withdrawals: int
+    total_revenue_uzs: int
+    total_payouts_uzs: int
+
+
+# ========== PAYMENT ACTIONS ==========
+
+@router.post("/payment/action")
+async def handle_payment_action(
+    request: PaymentActionRequest,
     db: AsyncSession = Depends(get_db),
-    _: bool = Depends(verify_admin),
 ):
-    """Get all pending top-up requests"""
-    stmt = (
-        select(Transaction)
-        .where(
-            Transaction.type == TransactionType.TOPUP,
-            Transaction.payment_status == "pending",
-        )
-        .order_by(desc(Transaction.created_at))
-    )
-    
-    result = await db.execute(stmt)
-    transactions = result.scalars().all()
-    
-    items = []
-    for t in transactions:
-        user = await db.get(User, t.user_id)
-        items.append({
-            "transaction_id": t.id,
-            "user_id": t.user_id,
-            "username": user.username if user else None,
-            "amount_credits": t.amount,
-            "amount_uzs": t.amount_uzs,
-            "has_screenshot": bool(t.payment_screenshot),
-            "created_at": t.created_at.isoformat(),
-        })
-    
-    return {"items": items, "total": len(items)}
-
-
-@router.post("/approve-payment/{transaction_id}")
-async def approve_payment(
-    transaction_id: int,
-    admin_id: int = 0,
-    db: AsyncSession = Depends(get_db),
-    _: bool = Depends(verify_admin),
-):
-    """Approve a pending top-up"""
+    """
+    Handle payment approval/rejection from admin channel.
+    """
     try:
-        result = await balance_service.confirm_topup(db, transaction_id, admin_id)
+        # Verify admin
+        admin = await db.get(User, request.admin_id)
+        if not admin or not admin.is_admin:
+            raise HTTPException(status_code=403, detail="Not authorized")
         
-        # Notify user
-        await telegram_service.send_payment_confirmed(
-            user_id=result["user_id"],
-            amount=result["amount"],
-            new_balance=result["new_balance"],
-        )
+        if request.action == "approve":
+            result = await payment_service.confirm_topup(
+                db, request.payment_id, request.admin_id
+            )
+            
+            # Notify user
+            await telegram_service.send_payment_confirmed(
+                user_id=result["user_id"],
+                credits=result["credits_added"],
+                new_balance=result["new_balance"],
+            )
+            
+            # Notify referrer about commission if applicable
+            if result.get("commission_info"):
+                commission = result["commission_info"]
+                user = await db.get(User, result["user_id"])
+                referrer = await db.get(User, commission["referrer_id"])
+                
+                if referrer:
+                    await telegram_service.send_referral_commission(
+                        referrer_id=referrer.id,
+                        referred_name=user.first_name or user.username or f"User #{user.id}",
+                        commission=commission["commission"],
+                        new_balance=commission["referrer_new_balance"],
+                    )
+            
+            return {"status": "approved", **result}
+            
+        elif request.action == "reject":
+            result = await payment_service.reject_topup(
+                db, request.payment_id, request.admin_id, request.reason or "Платёж не подтверждён"
+            )
+            
+            # Notify user
+            await telegram_service.send_payment_rejected(
+                user_id=result["user_id"],
+                reason=result["reason"],
+            )
+            
+            return {"status": "rejected", **result}
         
-        return {
-            "status": "approved",
-            "message": f"Payment approved. User {result['user_id']} received {result['amount']} credits.",
-        }
-        
+        else:
+            raise HTTPException(status_code=400, detail="Invalid action")
+            
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
 
-@router.post("/reject-payment/{transaction_id}")
-async def reject_payment(
-    transaction_id: int,
-    reason: str = "Payment rejected",
+# ========== WITHDRAWAL ACTIONS ==========
+
+@router.post("/withdrawal/action")
+async def handle_withdrawal_action(
+    request: WithdrawalActionRequest,
     db: AsyncSession = Depends(get_db),
-    _: bool = Depends(verify_admin),
 ):
-    """Reject a pending top-up"""
-    transaction = await db.get(Transaction, transaction_id)
-    if not transaction:
-        raise HTTPException(status_code=404, detail="Transaction not found")
-    
-    transaction.payment_status = "rejected"
-    transaction.description = f"{transaction.description} | Rejected: {reason}"
-    await db.commit()
-    
-    return {"status": "rejected", "message": "Payment rejected"}
+    """
+    Handle withdrawal approval/rejection from admin channel.
+    """
+    try:
+        # Verify admin
+        admin = await db.get(User, request.admin_id)
+        if not admin or not admin.is_admin:
+            raise HTTPException(status_code=403, detail="Not authorized")
+        
+        if request.action == "approve":
+            result = await payment_service.confirm_withdrawal(
+                db, request.withdrawal_id, request.admin_id
+            )
+            
+            # Notify user
+            await telegram_service.send_withdrawal_confirmed(
+                user_id=result["user_id"],
+                amount_uzs=result["amount_uzs"],
+            )
+            
+            return {"status": "approved", **result}
+            
+        elif request.action == "reject":
+            result = await payment_service.reject_withdrawal(
+                db, request.withdrawal_id, request.admin_id, request.reason or "Заявка отклонена"
+            )
+            
+            # Notify user
+            await telegram_service.send_withdrawal_rejected(
+                user_id=result["user_id"],
+                amount_uzs=result["amount_uzs"],
+                reason=result["reason"],
+            )
+            
+            return {"status": "rejected", **result}
+        
+        else:
+            raise HTTPException(status_code=400, detail="Invalid action")
+            
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
-@router.get("/pending-withdrawals")
-async def get_pending_withdrawals(
+# ========== ADMIN STATISTICS ==========
+
+@router.get("/stats", response_model=AdminStatsResponse)
+async def get_admin_stats(
+    admin_id: int,
     db: AsyncSession = Depends(get_db),
-    _: bool = Depends(verify_admin),
 ):
-    """Get all pending withdrawal requests"""
-    stmt = (
-        select(Transaction)
-        .where(
-            Transaction.type == TransactionType.WITHDRAWAL,
-            Transaction.payment_status == "pending",
-        )
-        .order_by(desc(Transaction.created_at))
-    )
+    """Get admin dashboard statistics"""
+    from sqlalchemy import select, func
     
-    result = await db.execute(stmt)
-    transactions = result.scalars().all()
-    
-    items = []
-    for t in transactions:
-        user = await db.get(User, t.user_id)
-        items.append({
-            "transaction_id": t.id,
-            "user_id": t.user_id,
-            "username": user.username if user else None,
-            "amount_uzs": t.amount_uzs,
-            "card_number": t.payment_method,
-            "created_at": t.created_at.isoformat(),
-        })
-    
-    return {"items": items, "total": len(items)}
-
-
-@router.post("/approve-withdrawal/{transaction_id}")
-async def approve_withdrawal(
-    transaction_id: int,
-    db: AsyncSession = Depends(get_db),
-    _: bool = Depends(verify_admin),
-):
-    """Approve a pending withdrawal"""
-    transaction = await db.get(Transaction, transaction_id)
-    if not transaction:
-        raise HTTPException(status_code=404, detail="Transaction not found")
-    
-    if transaction.payment_status != "pending":
-        raise HTTPException(status_code=400, detail="Transaction already processed")
-    
-    transaction.payment_status = "approved"
-    await db.commit()
-    
-    return {
-        "status": "approved",
-        "message": f"Withdrawal approved. Send {transaction.amount_uzs:,} UZS to {transaction.payment_method}",
-    }
-
-
-@router.get("/stats")
-async def get_stats(
-    db: AsyncSession = Depends(get_db),
-    _: bool = Depends(verify_admin),
-):
-    """Get platform statistics"""
-    from sqlalchemy import func
+    # Verify admin
+    admin = await db.get(User, admin_id)
+    if not admin or not admin.is_admin:
+        raise HTTPException(status_code=403, detail="Not authorized")
     
     # Total users
-    total_users = await db.scalar(select(func.count(User.id)))
+    result = await db.execute(select(func.count(User.id)))
+    total_users = result.scalar()
     
-    # Total generations
-    from app.models import Generation
-    total_generations = await db.scalar(select(func.count(Generation.id)))
+    # Active users (with at least 1 generation)
+    result = await db.execute(
+        select(func.count(User.id)).where(User.total_generations > 0)
+    )
+    active_users = result.scalar()
     
-    # Total revenue (approved top-ups)
-    total_revenue = await db.scalar(
-        select(func.sum(Transaction.amount_uzs))
-        .where(
-            Transaction.type == TransactionType.TOPUP,
-            Transaction.payment_status == "approved",
+    # Pending payments
+    result = await db.execute(
+        select(func.count(Payment.id)).where(Payment.status == PaymentStatus.PENDING)
+    )
+    pending_payments = result.scalar()
+    
+    # Pending withdrawals
+    result = await db.execute(
+        select(func.count(Withdrawal.id)).where(
+            Withdrawal.status.in_([WithdrawalStatus.PENDING, WithdrawalStatus.FROZEN])
         )
-    ) or 0
+    )
+    pending_withdrawals = result.scalar()
+    
+    # Total revenue
+    result = await db.execute(
+        select(func.sum(Payment.amount_uzs)).where(Payment.status == PaymentStatus.APPROVED)
+    )
+    total_revenue = result.scalar() or 0
+    
+    # Total payouts
+    result = await db.execute(
+        select(func.sum(Withdrawal.amount_uzs)).where(Withdrawal.status == WithdrawalStatus.APPROVED)
+    )
+    total_payouts = result.scalar() or 0
+    
+    return AdminStatsResponse(
+        total_users=total_users,
+        active_users=active_users,
+        pending_payments=pending_payments,
+        pending_withdrawals=pending_withdrawals,
+        total_revenue_uzs=total_revenue,
+        total_payouts_uzs=total_payouts,
+    )
+
+
+# ========== USER MANAGEMENT ==========
+
+@router.post("/user/{user_id}/credits")
+async def adjust_user_credits(
+    user_id: int,
+    admin_id: int,
+    amount: int,
+    reason: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Manually adjust user credits (add or remove).
+    Amount can be positive (add) or negative (remove).
+    """
+    # Verify admin
+    admin = await db.get(User, admin_id)
+    if not admin or not admin.is_admin:
+        raise HTTPException(status_code=403, detail="Not authorized")
+    
+    user = await db.get(User, user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    old_balance = user.credits
+    user.credits += amount
+    
+    if user.credits < 0:
+        raise HTTPException(status_code=400, detail="Cannot set negative balance")
+    
+    await db.commit()
+    
+    logger.info(
+        "Admin credits adjustment",
+        user_id=user_id,
+        admin_id=admin_id,
+        amount=amount,
+        reason=reason,
+        old_balance=old_balance,
+        new_balance=user.credits,
+    )
     
     return {
-        "total_users": total_users,
-        "total_generations": total_generations,
-        "total_revenue_uzs": total_revenue,
+        "user_id": user_id,
+        "old_balance": old_balance,
+        "new_balance": user.credits,
+        "adjustment": amount,
+        "reason": reason,
     }
+
+
+@router.post("/user/{user_id}/ban")
+async def ban_user(
+    user_id: int,
+    admin_id: int,
+    reason: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """Ban a user"""
+    admin = await db.get(User, admin_id)
+    if not admin or not admin.is_admin:
+        raise HTTPException(status_code=403, detail="Not authorized")
+    
+    user = await db.get(User, user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    user.is_banned = True
+    await db.commit()
+    
+    logger.info("User banned", user_id=user_id, admin_id=admin_id, reason=reason)
+    
+    return {"user_id": user_id, "is_banned": True}
+
+
+@router.post("/user/{user_id}/unban")
+async def unban_user(
+    user_id: int,
+    admin_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    """Unban a user"""
+    admin = await db.get(User, admin_id)
+    if not admin or not admin.is_admin:
+        raise HTTPException(status_code=403, detail="Not authorized")
+    
+    user = await db.get(User, user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    user.is_banned = False
+    await db.commit()
+    
+    logger.info("User unbanned", user_id=user_id, admin_id=admin_id)
+    
+    return {"user_id": user_id, "is_banned": False}

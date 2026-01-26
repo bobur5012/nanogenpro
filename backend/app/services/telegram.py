@@ -1,9 +1,14 @@
 """
-Telegram Bot Service for sending results to users
+Telegram Bot Service
+Handles notifications to users and admin channel
 """
 import httpx
-from telegram import Bot, InlineKeyboardButton, InlineKeyboardMarkup
+from datetime import datetime
+from telegram import Bot, InlineKeyboardButton, InlineKeyboardMarkup, InputFile
 from telegram.constants import ParseMode
+from io import BytesIO
+import base64
+
 from app.config import settings
 import structlog
 
@@ -16,6 +21,254 @@ class TelegramService:
     def __init__(self):
         self.bot = Bot(token=settings.telegram_bot_token)
         self.webapp_url = settings.webapp_url
+        self.admin_channel_id = settings.telegram_admin_channel_id
+    
+    # ========== ADMIN CHANNEL: PAYMENTS ==========
+    
+    async def send_payment_to_channel(
+        self,
+        payment_id: int,
+        user_id: int,
+        username: str | None,
+        first_name: str | None,
+        credits: int,
+        amount_uzs: int,
+        screenshot_data: str | None = None,
+    ) -> int:
+        """
+        Send payment request to admin channel for review.
+        Returns message_id for callback tracking.
+        """
+        user_display = f"@{username}" if username else (first_name or f"ID: {user_id}")
+        
+        text = (
+            f"💳 <b>ЗАЯВКА НА ПОПОЛНЕНИЕ</b>\n"
+            f"━━━━━━━━━━━━━━━\n\n"
+            f"👤 <b>Пользователь:</b> {user_display}\n"
+            f"🆔 <b>User ID:</b> <code>{user_id}</code>\n"
+            f"💎 <b>Кредиты:</b> {credits}\n"
+            f"💵 <b>Сумма:</b> {amount_uzs:,} UZS\n"
+            f"📅 <b>Дата:</b> {datetime.now().strftime('%d.%m.%Y %H:%M')}\n"
+            f"🔢 <b>Заявка:</b> #{payment_id}\n"
+        )
+        
+        keyboard = InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton("✅ Подтвердить", callback_data=f"payment_approve:{payment_id}"),
+                InlineKeyboardButton("❌ Отклонить", callback_data=f"payment_reject:{payment_id}"),
+            ]
+        ])
+        
+        try:
+            if screenshot_data and screenshot_data.startswith("data:image"):
+                # Extract base64 data
+                base64_data = screenshot_data.split(",")[1] if "," in screenshot_data else screenshot_data
+                image_bytes = base64.b64decode(base64_data)
+                
+                message = await self.bot.send_photo(
+                    chat_id=self.admin_channel_id,
+                    photo=BytesIO(image_bytes),
+                    caption=text,
+                    parse_mode=ParseMode.HTML,
+                    reply_markup=keyboard,
+                )
+            else:
+                message = await self.bot.send_message(
+                    chat_id=self.admin_channel_id,
+                    text=text + "\n⚠️ <i>Скриншот не прикреплён</i>",
+                    parse_mode=ParseMode.HTML,
+                    reply_markup=keyboard,
+                )
+            
+            logger.info("Payment sent to admin channel", payment_id=payment_id, message_id=message.message_id)
+            return message.message_id
+            
+        except Exception as e:
+            logger.error("Failed to send payment to channel", error=str(e), payment_id=payment_id)
+            raise
+    
+    # ========== ADMIN CHANNEL: WITHDRAWALS ==========
+    
+    async def send_withdrawal_to_channel(
+        self,
+        withdrawal_id: int,
+        user_id: int,
+        username: str | None,
+        first_name: str | None,
+        amount_uzs: int,
+        card_number: str,
+        card_type: str,
+    ) -> int:
+        """
+        Send withdrawal request to admin channel for review.
+        Returns message_id for callback tracking.
+        """
+        user_display = f"@{username}" if username else (first_name or f"ID: {user_id}")
+        
+        # Mask card number
+        masked_card = f"{card_number[:4]} **** **** {card_number[-4:]}"
+        
+        text = (
+            f"💸 <b>ЗАЯВКА НА ВЫВОД</b>\n"
+            f"━━━━━━━━━━━━━━━\n\n"
+            f"👤 <b>Партнёр:</b> {user_display}\n"
+            f"🆔 <b>User ID:</b> <code>{user_id}</code>\n"
+            f"💵 <b>Сумма:</b> {amount_uzs:,} UZS\n"
+            f"💳 <b>Карта:</b> <code>{card_number}</code>\n"
+            f"🏦 <b>Тип:</b> {card_type.upper()}\n"
+            f"📅 <b>Дата:</b> {datetime.now().strftime('%d.%m.%Y %H:%M')}\n"
+            f"🔢 <b>Заявка:</b> #{withdrawal_id}\n"
+        )
+        
+        keyboard = InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton("✅ Выплачено", callback_data=f"withdraw_approve:{withdrawal_id}"),
+                InlineKeyboardButton("❌ Отклонить", callback_data=f"withdraw_reject:{withdrawal_id}"),
+            ]
+        ])
+        
+        try:
+            message = await self.bot.send_message(
+                chat_id=self.admin_channel_id,
+                text=text,
+                parse_mode=ParseMode.HTML,
+                reply_markup=keyboard,
+            )
+            
+            logger.info("Withdrawal sent to admin channel", withdrawal_id=withdrawal_id, message_id=message.message_id)
+            return message.message_id
+            
+        except Exception as e:
+            logger.error("Failed to send withdrawal to channel", error=str(e), withdrawal_id=withdrawal_id)
+            raise
+    
+    # ========== USER NOTIFICATIONS ==========
+    
+    async def send_payment_pending(
+        self,
+        user_id: int,
+        credits: int,
+        amount_uzs: int,
+    ):
+        """Notify user that payment is pending review"""
+        text = (
+            f"⏳ <b>Заявка на пополнение</b>\n\n"
+            f"💎 Сумма: {credits} кредитов\n"
+            f"💵 Стоимость: {amount_uzs:,} сум\n\n"
+            f"Ожидайте подтверждения оператором (обычно 5-30 минут)."
+        )
+        
+        await self.bot.send_message(
+            chat_id=user_id,
+            text=text,
+            parse_mode=ParseMode.HTML,
+        )
+    
+    async def send_payment_confirmed(
+        self,
+        user_id: int,
+        credits: int,
+        new_balance: int,
+    ):
+        """Notify user that payment was confirmed"""
+        text = (
+            f"✅ <b>Баланс пополнен!</b>\n\n"
+            f"💎 +{credits} кредитов\n"
+            f"💰 Текущий баланс: {new_balance} 💎"
+        )
+        
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("🎬 Создать видео", callback_data="menu_video")],
+            [InlineKeyboardButton("🖼 Создать изображение", callback_data="menu_image")],
+        ])
+        
+        await self.bot.send_message(
+            chat_id=user_id,
+            text=text,
+            parse_mode=ParseMode.HTML,
+            reply_markup=keyboard,
+        )
+    
+    async def send_payment_rejected(
+        self,
+        user_id: int,
+        reason: str = "Платёж не подтверждён",
+    ):
+        """Notify user that payment was rejected"""
+        text = (
+            f"❌ <b>Заявка отклонена</b>\n\n"
+            f"Причина: {reason}\n\n"
+            f"Если вы уверены, что оплата была произведена, "
+            f"обратитесь в поддержку: @nanogen_support"
+        )
+        
+        await self.bot.send_message(
+            chat_id=user_id,
+            text=text,
+            parse_mode=ParseMode.HTML,
+        )
+    
+    async def send_withdrawal_pending(
+        self,
+        user_id: int,
+        amount_uzs: int,
+        card_number: str,
+    ):
+        """Notify user that withdrawal request is created"""
+        masked = f"{card_number[:4]} **** **** {card_number[-4:]}"
+        
+        text = (
+            f"⏳ <b>Заявка на вывод</b>\n\n"
+            f"💵 Сумма: {amount_uzs:,} сум\n"
+            f"💳 Карта: {masked}\n\n"
+            f"Выплата будет произведена в течение 24 часов."
+        )
+        
+        await self.bot.send_message(
+            chat_id=user_id,
+            text=text,
+            parse_mode=ParseMode.HTML,
+        )
+    
+    async def send_withdrawal_confirmed(
+        self,
+        user_id: int,
+        amount_uzs: int,
+    ):
+        """Notify user that withdrawal was completed"""
+        text = (
+            f"✅ <b>Выплата выполнена!</b>\n\n"
+            f"💵 Сумма: {amount_uzs:,} сум\n\n"
+            f"Деньги переведены на вашу карту."
+        )
+        
+        await self.bot.send_message(
+            chat_id=user_id,
+            text=text,
+            parse_mode=ParseMode.HTML,
+        )
+    
+    async def send_withdrawal_rejected(
+        self,
+        user_id: int,
+        amount_uzs: int,
+        reason: str = "Заявка отклонена",
+    ):
+        """Notify user that withdrawal was rejected"""
+        text = (
+            f"❌ <b>Заявка на вывод отклонена</b>\n\n"
+            f"💵 Сумма: {amount_uzs:,} сум\n"
+            f"Причина: {reason}\n\n"
+            f"Средства возвращены на ваш партнёрский баланс."
+        )
+        
+        await self.bot.send_message(
+            chat_id=user_id,
+            text=text,
+            parse_mode=ParseMode.HTML,
+        )
+    
+    # ========== GENERATION NOTIFICATIONS ==========
     
     async def send_generation_result(
         self,
@@ -23,12 +276,10 @@ class TelegramService:
         result_url: str,
         model_name: str,
         prompt: str,
-        generation_type: str,  # "image" or "video"
+        generation_type: str,
         generation_id: int,
     ):
         """Send generation result to user"""
-        
-        # Build caption
         caption = (
             f"✨ <b>Генерация завершена!</b>\n\n"
             f"🤖 <b>Модель:</b> {model_name}\n"
@@ -36,7 +287,6 @@ class TelegramService:
             f"🆔 #{generation_id}"
         )
         
-        # Keyboard with actions
         keyboard = InlineKeyboardMarkup([
             [
                 InlineKeyboardButton("🔄 Ещё раз", callback_data=f"regenerate:{generation_id}"),
@@ -46,11 +296,6 @@ class TelegramService:
         
         try:
             if generation_type == "image":
-                # Download and send image
-                async with httpx.AsyncClient() as client:
-                    response = await client.get(result_url)
-                    response.raise_for_status()
-                    
                 await self.bot.send_photo(
                     chat_id=user_id,
                     photo=result_url,
@@ -59,7 +304,6 @@ class TelegramService:
                     reply_markup=keyboard,
                 )
             else:
-                # Download and send video
                 await self.bot.send_video(
                     chat_id=user_id,
                     video=result_url,
@@ -69,11 +313,8 @@ class TelegramService:
                     supports_streaming=True,
                 )
             
-            logger.info("Result sent to user", user_id=user_id, generation_id=generation_id)
-            
         except Exception as e:
             logger.error("Failed to send result", error=str(e), user_id=user_id)
-            # Try to send as document if direct send fails
             try:
                 await self.bot.send_document(
                     chat_id=user_id,
@@ -94,7 +335,6 @@ class TelegramService:
         credits_refunded: int,
     ):
         """Notify user about failed generation"""
-        
         text = (
             f"❌ <b>Ошибка генерации</b>\n\n"
             f"🤖 Модель: {model_name}\n"
@@ -121,7 +361,6 @@ class TelegramService:
         estimated_time: int,
     ):
         """Notify user that generation has started"""
-        
         text = (
             f"⏳ <b>Генерация началась!</b>\n\n"
             f"🤖 Модель: {model_name}\n"
@@ -135,48 +374,29 @@ class TelegramService:
             parse_mode=ParseMode.HTML,
         )
     
-    async def send_payment_pending(
-        self,
-        user_id: int,
-        amount: int,
-        amount_uzs: int,
-    ):
-        """Notify user that payment is pending review"""
-        
-        text = (
-            f"⏳ <b>Заявка на пополнение</b>\n\n"
-            f"💎 Сумма: {amount} кредитов\n"
-            f"💵 Стоимость: {amount_uzs:,} сум\n\n"
-            f"Ожидайте подтверждения оператором."
-        )
-        
-        await self.bot.send_message(
-            chat_id=user_id,
-            text=text,
-            parse_mode=ParseMode.HTML,
-        )
+    # ========== REFERRAL NOTIFICATIONS ==========
     
-    async def send_payment_confirmed(
+    async def send_referral_commission(
         self,
-        user_id: int,
-        amount: int,
+        referrer_id: int,
+        referred_name: str,
+        commission: int,
         new_balance: int,
     ):
-        """Notify user that payment was confirmed"""
-        
+        """Notify partner about commission earned"""
         text = (
-            f"✅ <b>Баланс пополнен!</b>\n\n"
-            f"💎 +{amount} кредитов\n"
-            f"💰 Текущий баланс: {new_balance} 💎"
+            f"🎉 <b>Партнёрское начисление!</b>\n\n"
+            f"👤 Ваш реферал: {referred_name}\n"
+            f"💵 Комиссия: +{commission:,} UZS\n"
+            f"💰 Баланс: {new_balance:,} UZS"
         )
         
         keyboard = InlineKeyboardMarkup([
-            [InlineKeyboardButton("🎬 Создать видео", callback_data="menu_video")],
-            [InlineKeyboardButton("🖼 Создать изображение", callback_data="menu_image")],
+            [InlineKeyboardButton("📊 Статистика", callback_data="referral_stats")],
         ])
         
         await self.bot.send_message(
-            chat_id=user_id,
+            chat_id=referrer_id,
             text=text,
             parse_mode=ParseMode.HTML,
             reply_markup=keyboard,
