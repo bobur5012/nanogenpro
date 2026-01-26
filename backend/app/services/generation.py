@@ -85,7 +85,7 @@ class GenerationService:
         
         # 3. Deduct credits
         user.credits -= price
-        user.total_spent += price
+        user.total_spent_credits += price
         user.total_generations += 1
         user.last_active_at = datetime.utcnow()
         

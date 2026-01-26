@@ -119,9 +119,9 @@ class UserService:
             "referral_link": f"https://t.me/nanogenprobot?start=ref_{user.id}",
             "total_referrals": len(referrals),
             "active_referrals": active_count,
-            "total_earnings": user.referral_earnings,
+            "total_earnings": user.referral_total_earned,
             "available_balance": user.referral_balance,
-            "saved_card": user.saved_card,
+            "saved_card": user.saved_card_number,
         }
 
 

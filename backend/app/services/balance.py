@@ -25,7 +25,7 @@ class BalanceService:
         return {
             "credits": user.credits,
             "referral_balance": user.referral_balance,
-            "referral_earnings": user.referral_earnings,
+            "referral_total_earned": user.referral_total_earned,
         }
     
     async def add_credits(
@@ -139,7 +139,7 @@ class BalanceService:
             commission = transaction.amount // 4  # 25%
             referrer = await db.get(User, user.referrer_id)
             if referrer:
-                referrer.referral_earnings += commission
+                referrer.referral_total_earned += commission
                 referrer.referral_balance += commission
                 
                 # Update referral record
@@ -200,8 +200,8 @@ class BalanceService:
         user.referral_balance -= amount_uzs
         
         # Save card if not saved
-        if not user.saved_card:
-            user.saved_card = card_number
+        if not user.saved_card_number:
+            user.saved_card_number = card_number
         
         # Create withdrawal transaction
         transaction = Transaction(
