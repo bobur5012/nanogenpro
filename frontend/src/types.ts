@@ -66,6 +66,15 @@ export interface Job {
     resultUrl?: string;
 }
 
+// Referral Stats (for simulation/local use)
+export interface ReferralStats {
+    invitedCount: number;
+    activeCount: number;
+    totalEarnings: number;
+    balance: number;
+    savedCard?: string;
+}
+
 // Partner Stats (from API)
 export interface PartnerStats {
     referral_code: string;
