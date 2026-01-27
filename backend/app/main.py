@@ -52,21 +52,63 @@ async def lifespan(app: FastAPI):
     logger.info("Database initialized")
     
     # Initialize Telegram bot (WEBHOOK ONLY)
+    logger.info("Initializing Telegram bot...")
     bot_app = Application.builder().token(settings.telegram_bot_token).build()
     setup_handlers(bot_app)
     
     await bot_app.initialize()
     await bot_app.start()
+    logger.info("Telegram bot initialized and started")
     
     # Set webhook (production only)
+    logger.info(
+        "Checking webhook configuration",
+        webhook_url_set=bool(settings.telegram_webhook_url),
+        webhook_url_value=settings.telegram_webhook_url or "NOT SET",
+    )
+    
     if settings.telegram_webhook_url:
         webhook_url = f"{settings.telegram_webhook_url}/webhook/telegram"
-        await bot_app.bot.set_webhook(
-            url=webhook_url,
-            drop_pending_updates=True,
-            allowed_updates=["message", "callback_query"],  # Only what we need
-        )
-        logger.info("Telegram webhook set", url=webhook_url)
+        logger.info("Attempting to set webhook", url=webhook_url)
+        
+        try:
+            result = await bot_app.bot.set_webhook(
+                url=webhook_url,
+                drop_pending_updates=True,
+                allowed_updates=["message", "callback_query"],
+            )
+            logger.info(
+                "Telegram webhook set successfully",
+                url=webhook_url,
+                result=result,
+            )
+            
+            # Verify webhook was set
+            webhook_info = await bot_app.bot.get_webhook_info()
+            logger.info(
+                "Webhook verification",
+                webhook_url=webhook_info.url,
+                pending_updates=webhook_info.pending_update_count,
+                has_custom_certificate=webhook_info.has_custom_certificate,
+            )
+            
+            if webhook_info.url != webhook_url:
+                logger.warning(
+                    "Webhook URL mismatch",
+                    expected=webhook_url,
+                    actual=webhook_info.url,
+                )
+            
+        except Exception as e:
+            logger.error(
+                "Failed to set Telegram webhook",
+                url=webhook_url,
+                error=str(e),
+                error_type=type(e).__name__,
+                exc_info=True,
+            )
+            # Don't raise - app can still run, but bot won't receive updates
+            logger.warning("Bot will not receive updates until webhook is set manually")
     else:
         logger.warning("TELEGRAM_WEBHOOK_URL not set - bot will not receive updates!")
         logger.warning("For development, run bot separately: python -m app.bot.polling")
