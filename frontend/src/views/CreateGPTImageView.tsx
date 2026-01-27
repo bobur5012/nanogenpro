@@ -37,7 +37,7 @@ const SIZES: { id: Size; label: string }[] = [
 const BASE_COST = 2; // Credits base
 const CREDITS_PER_DOLLAR = 100;
 
-export const CreateGPTImageView: React.FC<CreateGPTImageViewProps> = ({ userCredits, onOpenProfile }) => {
+export const CreateGPTImageView: React.FC<CreateGPTImageViewProps> = ({ userCredits, onOpenProfile, onCreditsUpdate }) => {
     // State
     const [mode, setMode] = useState<GPTMode>('text');
     const [prompt, setPrompt] = useState('');
