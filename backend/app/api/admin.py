@@ -8,6 +8,7 @@ from pydantic import BaseModel
 from typing import Optional
 
 from app.database import get_db
+from app.api.deps import require_admin_user
 from app.services.payment import payment_service
 from app.services.telegram import telegram_service
 from app.services.referral import referral_service
@@ -48,20 +49,19 @@ class AdminStatsResponse(BaseModel):
 @router.post("/payment/action")
 async def handle_payment_action(
     request: PaymentActionRequest,
+    admin_user=Depends(require_admin_user),
     db: AsyncSession = Depends(get_db),
 ):
     """
     Handle payment approval/rejection from admin channel.
     """
     try:
-        # Verify admin
-        admin = await db.get(User, request.admin_id)
-        if not admin or not admin.is_admin:
+        if request.admin_id != admin_user.id:
             raise HTTPException(status_code=403, detail="Not authorized")
         
         if request.action == "approve":
             result = await payment_service.confirm_topup(
-                db, request.payment_id, request.admin_id
+                db, request.payment_id, admin_user.id
             )
             
             # Notify user
@@ -89,7 +89,7 @@ async def handle_payment_action(
             
         elif request.action == "reject":
             result = await payment_service.reject_topup(
-                db, request.payment_id, request.admin_id, request.reason or "Платёж не подтверждён"
+                db, request.payment_id, admin_user.id, request.reason or "Платёж не подтверждён"
             )
             
             # Notify user
@@ -112,20 +112,19 @@ async def handle_payment_action(
 @router.post("/withdrawal/action")
 async def handle_withdrawal_action(
     request: WithdrawalActionRequest,
+    admin_user=Depends(require_admin_user),
     db: AsyncSession = Depends(get_db),
 ):
     """
     Handle withdrawal approval/rejection from admin channel.
     """
     try:
-        # Verify admin
-        admin = await db.get(User, request.admin_id)
-        if not admin or not admin.is_admin:
+        if request.admin_id != admin_user.id:
             raise HTTPException(status_code=403, detail="Not authorized")
         
         if request.action == "approve":
             result = await payment_service.confirm_withdrawal(
-                db, request.withdrawal_id, request.admin_id
+                db, request.withdrawal_id, admin_user.id
             )
             
             # Notify user
@@ -138,7 +137,7 @@ async def handle_withdrawal_action(
             
         elif request.action == "reject":
             result = await payment_service.reject_withdrawal(
-                db, request.withdrawal_id, request.admin_id, request.reason or "Заявка отклонена"
+                db, request.withdrawal_id, admin_user.id, request.reason or "Заявка отклонена"
             )
             
             # Notify user
@@ -162,14 +161,12 @@ async def handle_withdrawal_action(
 @router.get("/stats", response_model=AdminStatsResponse)
 async def get_admin_stats(
     admin_id: int,
+    admin_user=Depends(require_admin_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Get admin dashboard statistics"""
     from sqlalchemy import select, func
-    
-    # Verify admin
-    admin = await db.get(User, admin_id)
-    if not admin or not admin.is_admin:
+    if admin_id != admin_user.id:
         raise HTTPException(status_code=403, detail="Not authorized")
     
     # Total users
@@ -221,15 +218,13 @@ async def get_admin_stats(
 @router.get("/payments/pending")
 async def get_pending_payments(
     admin_id: int,
+    admin_user=Depends(require_admin_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Get list of pending payments"""
     from sqlalchemy import select
     from datetime import datetime
-    
-    # Verify admin
-    admin = await db.get(User, admin_id)
-    if not admin or not admin.is_admin:
+    if admin_id != admin_user.id:
         raise HTTPException(status_code=403, detail="Not authorized")
     
     result = await db.execute(
@@ -256,14 +251,12 @@ async def get_pending_payments(
 @router.get("/withdrawals/pending")
 async def get_pending_withdrawals(
     admin_id: int,
+    admin_user=Depends(require_admin_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Get list of pending withdrawals"""
     from sqlalchemy import select
-    
-    # Verify admin
-    admin = await db.get(User, admin_id)
-    if not admin or not admin.is_admin:
+    if admin_id != admin_user.id:
         raise HTTPException(status_code=403, detail="Not authorized")
     
     result = await db.execute(
@@ -296,15 +289,14 @@ async def adjust_user_credits(
     admin_id: int,
     amount: int,
     reason: str,
+    admin_user=Depends(require_admin_user),
     db: AsyncSession = Depends(get_db),
 ):
     """
     Manually adjust user credits (add or remove).
     Amount can be positive (add) or negative (remove).
     """
-    # Verify admin
-    admin = await db.get(User, admin_id)
-    if not admin or not admin.is_admin:
+    if admin_id != admin_user.id:
         raise HTTPException(status_code=403, detail="Not authorized")
     
     user = await db.get(User, user_id)
@@ -343,11 +335,11 @@ async def ban_user(
     user_id: int,
     admin_id: int,
     reason: str,
+    admin_user=Depends(require_admin_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Ban a user"""
-    admin = await db.get(User, admin_id)
-    if not admin or not admin.is_admin:
+    if admin_id != admin_user.id:
         raise HTTPException(status_code=403, detail="Not authorized")
     
     user = await db.get(User, user_id)
@@ -366,11 +358,11 @@ async def ban_user(
 async def unban_user(
     user_id: int,
     admin_id: int,
+    admin_user=Depends(require_admin_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Unban a user"""
-    admin = await db.get(User, admin_id)
-    if not admin or not admin.is_admin:
+    if admin_id != admin_user.id:
         raise HTTPException(status_code=403, detail="Not authorized")
     
     user = await db.get(User, user_id)

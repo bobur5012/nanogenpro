@@ -146,7 +146,7 @@ export const CreateGPTImageView: React.FC<CreateGPTImageViewProps> = ({ userCred
             const result = await generationAPI.start({
                 user_id: userData.userId,
                 init_data: userData.initData,
-                model_id: 'gpt-image/1.5',
+                model_id: 'gpt-image-1',
                 model_name: 'GPT Image 1.5',
                 generation_type: 'image',
                 prompt: prompt.trim(),

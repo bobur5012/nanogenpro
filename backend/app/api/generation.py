@@ -9,6 +9,7 @@ from app.schemas.generation import GenerationRequest, GenerationResponse
 from app.services.generation import generation_service
 from app.services.user import user_service
 from app.services.telegram import telegram_service
+from app.api.deps import require_current_user
 from app.schemas.user import TelegramUser
 from app.config import settings
 import structlog
@@ -22,6 +23,7 @@ router = APIRouter(prefix="/api/generation", tags=["Generation"])
 async def start_generation(
     request: GenerationRequest,
     background_tasks: BackgroundTasks,
+    current_user=Depends(require_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -35,6 +37,10 @@ async def start_generation(
     5. Send result via Telegram when done
     """
     try:
+        # Ensure request user matches authenticated user
+        if request.user_id != current_user.id:
+            raise HTTPException(status_code=403, detail="Not authorized")
+
         # Verify Telegram init_data signature
         from app.services.telegram import telegram_service
         
@@ -187,6 +193,7 @@ async def process_generation_background(generation_id: int):
 @router.get("/status/{generation_id}")
 async def get_generation_status(
     generation_id: int,
+    current_user=Depends(require_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Get generation status"""
@@ -196,6 +203,9 @@ async def get_generation_status(
     if not generation:
         raise HTTPException(status_code=404, detail="Generation not found")
     
+    if generation.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not authorized")
+
     return {
         "id": generation.id,
         "status": generation.status.value,
@@ -210,6 +220,7 @@ async def get_generation_status(
 async def cancel_generation(
     generation_id: int,
     user_id: int,
+    current_user=Depends(require_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -217,6 +228,9 @@ async def cancel_generation(
     Refunds credits.
     """
     try:
+        if user_id != current_user.id:
+            raise HTTPException(status_code=403, detail="Not authorized")
+
         result = await generation_service.cancel_generation(db, generation_id, user_id)
         return result
     except PermissionError as e:
@@ -237,11 +251,15 @@ async def get_generation_history(
     user_id: int,
     limit: int = 20,
     offset: int = 0,
+    current_user=Depends(require_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Get user's generation history"""
     from sqlalchemy import select, desc
     from app.models import Generation
+
+    if user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not authorized")
     
     stmt = (
         select(Generation)

@@ -144,7 +144,7 @@ export const CreateVeoView: React.FC<CreateVeoViewProps> = ({ userCredits, onOpe
             const result = await generationAPI.start({
                 user_id: userData.userId,
                 init_data: userData.initData,
-                model_id: 'veo/3.1',
+                model_id: 'google/veo-3.1-generate',
                 model_name: 'Veo 3.1',
                 generation_type: 'video',
                 prompt: prompt.trim(),

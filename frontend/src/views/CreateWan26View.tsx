@@ -162,8 +162,8 @@ export const CreateWan26View: React.FC<CreateWan26ViewProps> = ({ userCredits, o
             const result = await generationAPI.start({
                 user_id: userData.userId,
                 init_data: userData.initData,
-                model_id: 'wan/2.6',
-                model_name: 'Wan 2.6',
+                model_id: 'wan-ai/wan2.6-t2v-turbo',
+                model_name: 'Wan 2.6 Turbo',
                 generation_type: 'video',
                 prompt: prompt.trim(),
                 image_url: imageUrl,

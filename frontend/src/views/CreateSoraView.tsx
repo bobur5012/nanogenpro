@@ -73,7 +73,7 @@ export const CreateSoraView: React.FC<CreateSoraViewProps> = ({ userCredits, onO
         const result = await generationAPI.start({
             user_id: userData.userId,
             init_data: userData.initData,
-            model_id: 'sora/2-pro',
+            model_id: 'openai/sora-2-pro',
             model_name: 'Sora 2 Pro',
             generation_type: 'video',
             prompt: prompt.trim(),

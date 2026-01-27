@@ -146,14 +146,18 @@ app = FastAPI(
 # CORS Configuration
 # Telegram WebApp doesn't need credentials, so we disable them
 # This allows preflight OPTIONS requests to work correctly
+allowed_origins = [
+    "https://nanogenbot.netlify.app",
+    "http://localhost:5173",
+    "http://localhost:3000",
+    "http://localhost:5174",  # Vite HMR alternate port
+]
+
+logger.info("CORS configuration", allowed_origins=allowed_origins)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "https://nanogenbot.netlify.app",
-        "http://localhost:5173",
-        "http://localhost:3000",
-        "http://localhost:5174",  # Vite HMR alternate port
-    ],
+    allow_origins=allowed_origins,
     allow_credentials=False,  # Required: Cannot use "*" origins with credentials=True
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
     allow_headers=[
@@ -167,6 +171,19 @@ app.add_middleware(
     expose_headers=["*"],
     max_age=3600,  # Cache preflight for 1 hour
 )
+
+# CORS request logging middleware
+@app.middleware("http")
+async def cors_logging_middleware(request: Request, call_next):
+    origin = request.headers.get("origin")
+    if origin:
+        logger.debug("CORS request", origin=origin, path=request.url.path, method=request.method)
+    response = await call_next(request)
+    # Log CORS headers in response
+    cors_headers = {k: v for k, v in response.headers.items() if k.startswith("access-control")}
+    if cors_headers:
+        logger.debug("CORS response headers", headers=cors_headers, origin=origin)
+    return response
 
 # Include routers
 app.include_router(generation.router)

@@ -42,10 +42,24 @@ async function fetchAPI<T>(
 
   if (!response.ok) {
     const error = await response.json().catch(() => ({ detail: 'Unknown error' }));
+    
+    // Handle validation errors (422)
+    if (response.status === 422 && error.detail) {
+      // Pydantic validation errors
+      const validationErrors = Array.isArray(error.detail) 
+        ? error.detail.map((e: any) => `${e.loc?.join('.')}: ${e.msg}`).join(', ')
+        : error.detail;
+      throw new Error(JSON.stringify({ 
+        code: 'VALIDATION_ERROR', 
+        message: `Ошибка валидации: ${validationErrors}` 
+      }));
+    }
+    
     // Если ошибка структурированная (с code и message)
     if (error.code && error.message) {
       throw new Error(JSON.stringify({ code: error.code, message: error.message }));
     }
+    
     throw new Error(error.detail || error.message || `HTTP ${response.status}`);
   }
 
@@ -54,7 +68,35 @@ async function fetchAPI<T>(
 
 // User API
 export const userAPI = {
-  auth: () => fetchAPI<{ user: any; credits: number }>('/api/user/auth', { method: 'POST' }),
+  auth: () => {
+    const tg = window.Telegram?.WebApp;
+    const tgUser = tg?.initDataUnsafe?.user;
+    
+    if (!tgUser) {
+      throw new Error('Telegram user data not available');
+    }
+    
+    // Extract referral code from start_param if present
+    const startParam = tg.initDataUnsafe?.start_param;
+    let referralCode: string | undefined;
+    if (startParam && startParam.startsWith('ref_')) {
+      referralCode = startParam.substring(4); // Remove "ref_" prefix
+    }
+    
+    return fetchAPI<{ user: any; credits: number }>('/api/user/auth', {
+      method: 'POST',
+      body: JSON.stringify({
+        telegram_user: {
+          id: tgUser.id,
+          username: tgUser.username,
+          first_name: tgUser.first_name,
+          last_name: tgUser.last_name,
+          language_code: tgUser.language_code || 'ru',
+        },
+        referral_code: referralCode,
+      }),
+    });
+  },
   getBalance: (userId: number) => fetchAPI<{ credits: number }>(`/api/user/balance/${userId}`),
   getReferralStats: (userId: number) => fetchAPI<PartnerStats>(`/api/user/partner/${userId}`),
   getPackages: () => fetchAPI<{ packages: CreditPackage[]; card: PaymentCard }>('/api/user/packages'),

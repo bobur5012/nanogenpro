@@ -172,8 +172,8 @@ export const CreateSeedanceView: React.FC<CreateSeedanceViewProps> = ({ userCred
             const result = await generationAPI.start({
                 user_id: userData.userId,
                 init_data: userData.initData,
-                model_id: 'seedance/1.0',
-                model_name: 'Seedance 1.0',
+                model_id: 'bytedance/seedance-1-lite',
+                model_name: 'Seedance 1 Lite',
                 generation_type: 'video',
                 prompt: prompt.trim(),
                 image_url: imageUrl,

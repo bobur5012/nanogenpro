@@ -8,6 +8,7 @@ from typing import Optional
 
 from app.database import get_db
 from app.schemas.user import UserCreate, UserResponse, UserBalance, TelegramUser
+from app.api.deps import require_telegram_user, require_current_user
 from app.services.user import user_service
 from app.services.referral import referral_service
 from app.services.payment import payment_service
@@ -50,9 +51,10 @@ class PartnerStatsResponse(BaseModel):
 
 # ========== ENDPOINTS ==========
 
-@router.post("/auth", response_model=UserResponse)
+@router.post("/auth")
 async def authenticate_user(
     data: UserCreate,
+    tg_user: dict = Depends(require_telegram_user),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -60,26 +62,38 @@ async def authenticate_user(
     Handles referral linking on first registration.
     """
     try:
-        user = await user_service.get_or_create_user(
-            db,
-            data.telegram_user,
-            data.referral_code,
+        tg_payload = TelegramUser(
+            id=tg_user["id"],
+            username=tg_user.get("username"),
+            first_name=tg_user.get("first_name"),
+            last_name=tg_user.get("last_name"),
+            language_code=tg_user.get("language_code") or "ru",
         )
+
+        if data.telegram_user.id != tg_payload.id:
+            logger.warning(
+                "Telegram user mismatch in auth payload",
+                body_user_id=data.telegram_user.id,
+                tg_user_id=tg_payload.id,
+            )
+
+        user = await user_service.get_or_create_user(db, tg_payload, data.referral_code)
         
         # Process referral if provided and not already linked
         if data.referral_code and not user.referrer_id:
             await referral_service.process_referral(db, user.id, data.referral_code)
         
-        return UserResponse(
-            id=user.id,
-            username=user.username,
-            first_name=user.first_name,
-            credits=user.credits,
-            referral_code=user.referral_code,
-            total_generations=user.total_generations,
-            is_premium=user.is_premium,
-            created_at=user.created_at,
-        )
+        # Return format expected by frontend
+        return {
+            "user": {
+                "id": user.id,
+                "username": user.username,
+                "first_name": user.first_name,
+                "last_name": user.last_name,
+                "language_code": user.language_code,
+            },
+            "credits": user.credits,
+        }
         
     except Exception as e:
         logger.error("User auth failed", error=str(e))
@@ -89,10 +103,13 @@ async def authenticate_user(
 @router.get("/balance/{user_id}")
 async def get_user_balance(
     user_id: int,
+    current_user=Depends(require_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Get user balance"""
     from app.models import User
+    if user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not authorized")
     user = await db.get(User, user_id)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
@@ -122,6 +139,7 @@ async def get_credit_packages():
 @router.post("/topup")
 async def request_topup(
     request: TopUpRequest,
+    current_user=Depends(require_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -130,6 +148,9 @@ async def request_topup(
     """
     try:
         # Create payment record
+        if request.user_id != current_user.id:
+            raise HTTPException(status_code=403, detail="Not authorized")
+
         payment_info = await payment_service.create_topup_request(
             db,
             request.user_id,
@@ -185,6 +206,7 @@ async def request_topup(
 @router.post("/withdraw")
 async def request_withdrawal(
     request: WithdrawRequest,
+    current_user=Depends(require_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -193,6 +215,9 @@ async def request_withdrawal(
     """
     try:
         # Create withdrawal record
+        if request.user_id != current_user.id:
+            raise HTTPException(status_code=403, detail="Not authorized")
+
         withdrawal_info = await payment_service.create_withdrawal_request(
             db,
             request.user_id,
@@ -240,10 +265,13 @@ async def request_withdrawal(
 @router.get("/partner/{user_id}", response_model=PartnerStatsResponse)
 async def get_partner_stats(
     user_id: int,
+    current_user=Depends(require_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Get user's partner program statistics"""
     try:
+        if user_id != current_user.id:
+            raise HTTPException(status_code=403, detail="Not authorized")
         stats = await referral_service.get_partner_stats(db, user_id)
         return PartnerStatsResponse(**stats)
     except ValueError as e:
@@ -253,10 +281,13 @@ async def get_partner_stats(
 @router.get("/partner/{user_id}/referrals")
 async def get_partner_referrals(
     user_id: int,
+    current_user=Depends(require_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Get list of user's referrals"""
     try:
+        if user_id != current_user.id:
+            raise HTTPException(status_code=403, detail="Not authorized")
         referrals = await referral_service.get_referral_list(db, user_id)
         return {"referrals": referrals}
     except ValueError as e:
