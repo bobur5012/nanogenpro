@@ -8,7 +8,9 @@ from app.database import get_db
 from app.schemas.generation import GenerationRequest, GenerationResponse
 from app.services.generation import generation_service
 from app.services.user import user_service
+from app.services.telegram import telegram_service
 from app.schemas.user import TelegramUser
+from app.config import settings
 import structlog
 from datetime import datetime
 
@@ -33,8 +35,38 @@ async def start_generation(
     5. Send result via Telegram when done
     """
     try:
-        # TODO: Verify Telegram init_data signature
-        # For now, we trust the user_id
+        # Verify Telegram init_data signature
+        from app.services.telegram import telegram_service
+        
+        if request.init_data:
+            is_valid = telegram_service.verify_init_data(
+                init_data=request.init_data,
+                user_id=request.user_id
+            )
+            if not is_valid:
+                logger.warning(
+                    "Invalid init_data signature",
+                    user_id=request.user_id,
+                )
+                raise HTTPException(
+                    status_code=403,
+                    detail={
+                        "code": "INVALID_SIGNATURE",
+                        "message": "Недействительная подпись Telegram WebApp",
+                    }
+                )
+        else:
+            logger.warning("No init_data provided", user_id=request.user_id)
+            # In production, reject requests without init_data
+            # For development, allow but log warning
+            if not settings.debug:
+                raise HTTPException(
+                    status_code=400,
+                    detail={
+                        "code": "MISSING_INIT_DATA",
+                        "message": "Требуется init_data от Telegram WebApp",
+                    }
+                )
         
         # Extract idempotency key from request (if provided)
         idempotency_key = getattr(request, 'idempotency_key', None)

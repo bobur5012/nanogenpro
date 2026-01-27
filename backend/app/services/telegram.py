@@ -8,6 +8,10 @@ from telegram import Bot, InlineKeyboardButton, InlineKeyboardMarkup, InputFile
 from telegram.constants import ParseMode
 from io import BytesIO
 import base64
+import hmac
+import hashlib
+from urllib.parse import parse_qsl
+from typing import Optional, Dict, Any
 
 from app.config import settings
 import structlog
@@ -22,6 +26,102 @@ class TelegramService:
         self.bot = Bot(token=settings.telegram_bot_token)
         self.webapp_url = settings.webapp_url
         self.admin_channel_id = settings.telegram_admin_channel_id
+        self.bot_token = settings.telegram_bot_token
+    
+    def verify_init_data(self, init_data: str, user_id: Optional[int] = None) -> bool:
+        """
+        Verify Telegram WebApp init_data signature.
+        
+        Algorithm:
+        1. Parse init_data into key-value pairs
+        2. Extract 'hash' parameter
+        3. Create data_check_string from all params except 'hash', sorted alphabetically
+        4. Create secret_key = HMAC_SHA256(bot_token, "WebAppData")
+        5. Calculate hash = HMAC_SHA256(secret_key, data_check_string)
+        6. Compare with provided hash
+        
+        Args:
+            init_data: Raw init_data string from Telegram WebApp
+            user_id: Optional user_id to verify matches
+            
+        Returns:
+            True if signature is valid, False otherwise
+        """
+        try:
+            # Parse init_data
+            parsed = dict(parse_qsl(init_data))
+            
+            # Extract hash
+            provided_hash = parsed.pop('hash', None)
+            if not provided_hash:
+                logger.warning("No hash in init_data")
+                return False
+            
+            # Verify user_id if provided
+            if user_id is not None:
+                parsed_user_id = parsed.get('user')
+                if parsed_user_id:
+                    # user is JSON string, parse it
+                    import json
+                    try:
+                        user_data = json.loads(parsed_user_id)
+                        if user_data.get('id') != user_id:
+                            logger.warning("User ID mismatch", expected=user_id, got=user_data.get('id'))
+                            return False
+                    except json.JSONDecodeError:
+                        logger.warning("Invalid user JSON in init_data")
+                        return False
+            
+            # Create data_check_string (sorted alphabetically)
+            data_check_string = '\n'.join(
+                f"{key}={value}"
+                for key, value in sorted(parsed.items())
+            )
+            
+            # Create secret_key
+            secret_key = hmac.new(
+                "WebAppData".encode(),
+                self.bot_token.encode(),
+                hashlib.sha256
+            ).digest()
+            
+            # Calculate hash
+            calculated_hash = hmac.new(
+                secret_key,
+                data_check_string.encode(),
+                hashlib.sha256
+            ).hexdigest()
+            
+            # Compare
+            is_valid = hmac.compare_digest(calculated_hash, provided_hash)
+            
+            if not is_valid:
+                logger.warning("Invalid init_data signature")
+            
+            return is_valid
+            
+        except Exception as e:
+            logger.error("Error verifying init_data", error=str(e), error_type=type(e).__name__)
+            return False
+    
+    def extract_user_from_init_data(self, init_data: str) -> Optional[Dict[str, Any]]:
+        """
+        Extract user data from init_data (after verification).
+        
+        Returns:
+            User dict with id, first_name, username, etc. or None if invalid
+        """
+        try:
+            parsed = dict(parse_qsl(init_data))
+            user_str = parsed.get('user')
+            if not user_str:
+                return None
+            
+            import json
+            return json.loads(user_str)
+        except Exception as e:
+            logger.error("Error extracting user from init_data", error=str(e))
+            return None
     
     # ========== ADMIN CHANNEL: PAYMENTS ==========
     
