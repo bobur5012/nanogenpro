@@ -30,4 +30,4 @@
 
 # Environment variables context
 [context.production.environment]
-  VITE_API_URL = "https://your-backend.up.railway.app"
+  VITE_API_URL = "https://nanogenpro-production.up.railway.app"

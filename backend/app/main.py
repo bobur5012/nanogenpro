@@ -143,19 +143,29 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# CORS - FIXED: Cannot use "*" with allow_credentials=True
+# CORS Configuration
 # Telegram WebApp doesn't need credentials, so we disable them
+# This allows preflight OPTIONS requests to work correctly
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         "https://nanogenbot.netlify.app",
         "http://localhost:5173",
         "http://localhost:3000",
+        "http://localhost:5174",  # Vite HMR alternate port
     ],
-    allow_credentials=False,  # ← FIXED: Telegram WebApp doesn't send credentials
-    allow_methods=["*"],
-    allow_headers=["*"],
-    # Note: Wildcard origins not needed - Telegram validates on their side
+    allow_credentials=False,  # Required: Cannot use "*" origins with credentials=True
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
+    allow_headers=[
+        "Content-Type",
+        "Authorization",
+        "X-Telegram-Init-Data",  # Telegram WebApp authentication header
+        "X-Requested-With",
+        "Accept",
+        "Origin",
+    ],
+    expose_headers=["*"],
+    max_age=3600,  # Cache preflight for 1 hour
 )
 
 # Include routers

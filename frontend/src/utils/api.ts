@@ -1,7 +1,14 @@
 // API Configuration
 import type { PartnerStats, CreditPackage, PaymentCard } from '../types';
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+// Use production URL as default if env var is not set
+const API_URL = import.meta.env.VITE_API_URL || 'https://nanogenpro-production.up.railway.app';
+
+// Debug: Log API URL in development
+if (import.meta.env.DEV) {
+  console.log('[API] Using API URL:', API_URL);
+  console.log('[API] VITE_API_URL from env:', import.meta.env.VITE_API_URL);
+}
 
 // Generic fetch wrapper with error handling
 async function fetchAPI<T>(
@@ -18,6 +25,11 @@ async function fetchAPI<T>(
   const tg = window.Telegram?.WebApp;
   if (tg?.initData) {
     defaultHeaders['X-Telegram-Init-Data'] = tg.initData;
+  }
+
+  // Debug logging in development
+  if (import.meta.env.DEV) {
+    console.log('[API] Request:', options.method || 'GET', url);
   }
 
   const response = await fetch(url, {
