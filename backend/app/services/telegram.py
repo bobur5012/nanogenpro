@@ -160,29 +160,39 @@ class TelegramService:
         ])
         
         try:
-            if screenshot_data and screenshot_data.startswith("data:image"):
-                # Extract base64 data
-                base64_data = screenshot_data.split(",")[1] if "," in screenshot_data else screenshot_data
-                image_bytes = base64.b64decode(base64_data)
-                
-                message = await self.bot.send_photo(
-                    chat_id=self.admin_channel_id,
-                    photo=BytesIO(image_bytes),
-                    caption=text,
-                    parse_mode=ParseMode.HTML,
-                    reply_markup=keyboard,
-                )
-            else:
-                message = await self.bot.send_message(
-                    chat_id=self.admin_channel_id,
-                    text=text + "\n⚠️ <i>Скриншот не прикреплён</i>",
-                    parse_mode=ParseMode.HTML,
-                    reply_markup=keyboard,
-                )
-            
+            if screenshot_data:
+                base64_data = screenshot_data
+                if screenshot_data.startswith("data:image"):
+                    base64_data = screenshot_data.split(",")[1] if "," in screenshot_data else screenshot_data
+
+                try:
+                    image_bytes = base64.b64decode(base64_data)
+                    message = await self.bot.send_photo(
+                        chat_id=self.admin_channel_id,
+                        photo=BytesIO(image_bytes),
+                        caption=text,
+                        parse_mode=ParseMode.HTML,
+                        reply_markup=keyboard,
+                    )
+                    logger.info("Payment sent to admin channel", payment_id=payment_id, message_id=message.message_id)
+                    return message.message_id
+                except Exception as e:
+                    logger.warning(
+                        "Failed to decode screenshot, sending without image",
+                        payment_id=payment_id,
+                        error=str(e),
+                    )
+
+            message = await self.bot.send_message(
+                chat_id=self.admin_channel_id,
+                text=text + "\n⚠️ <i>Скриншот не прикреплён</i>",
+                parse_mode=ParseMode.HTML,
+                reply_markup=keyboard,
+            )
+
             logger.info("Payment sent to admin channel", payment_id=payment_id, message_id=message.message_id)
             return message.message_id
-            
+
         except Exception as e:
             logger.error("Failed to send payment to channel", error=str(e), payment_id=payment_id)
             raise

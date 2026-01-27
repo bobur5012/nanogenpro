@@ -6,12 +6,13 @@ import json
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any, Callable
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, update, func
+from sqlalchemy import select, update, func, and_
 
 from app.models import User, Generation, GenerationStatus, Transaction, TransactionType
 from app.schemas.generation import GenerationRequest, GenerationType
 from app.services.aiml import aiml_client
 from app.services.telegram import telegram_service
+from app.services.storage import storage_service, StorageUploadError
 from app.config import settings
 from app.exceptions import (
     UserNotFoundError,
@@ -186,32 +187,31 @@ class GenerationService:
         
         if user.credits < price:
             raise InsufficientCreditsError(required=price, available=user.credits)
-        
-        # 5. ATOMIC CREDIT DEDUCTION
-        # This prevents race conditions by using database-level atomic update
-        stmt = (
-            update(User)
-            .where(
-                User.id == user.id,
-                User.credits >= price,  # ← CRITICAL: ensure balance still sufficient
-            )
-            .values(
-                credits=User.credits - price,
-                total_spent_credits=User.total_spent_credits + price,
-                total_generations=User.total_generations + 1,
-                last_active_at=datetime.utcnow(),
-            )
-            .returning(User.credits)
-        )
-        
-        result = await db.execute(stmt)
-        new_balance = result.scalar_one_or_none()
-        
-        if new_balance is None:
-            # Another request beat us to it, balance insufficient now
-            raise ConcurrentUpdateError()
-        
-        # 6. CREATE GENERATION RECORD
+
+        # 5. HANDLE IMAGE UPLOAD (if provided)
+        params = dict(request.parameters or {})
+        image_base64 = request.image_base64 or params.pop("image_base64", None)
+        if not image_base64 and request.image_url:
+            # Backward compatibility: treat image_url as base64 input
+            image_base64 = request.image_url
+
+        if image_base64:
+            try:
+                image_url = storage_service.upload_base64_image(
+                    image_base64,
+                    prefix=f"uploads/{user.id}",
+                )
+                params["image_url"] = image_url
+            except StorageUploadError as e:
+                logger.error(
+                    "Image upload failed",
+                    user_id=user.id,
+                    model=request.model_id,
+                    error=str(e),
+                )
+                raise
+
+        # 6. CREATE GENERATION RECORD (no credit deduction yet)
         generation = Generation(
             user_id=user.id,
             model_id=request.model_id,
@@ -219,26 +219,14 @@ class GenerationService:
             generation_type=request.generation_type.value,
             prompt=request.prompt,
             negative_prompt=request.negative_prompt,
-            parameters=json.dumps(request.parameters) if request.parameters else None,
+            parameters=json.dumps(params) if params else None,
             credits_charged=price,
             status=GenerationStatus.PENDING,
             idempotency_key=idempotency_key,
             timeout_at=datetime.utcnow() + timedelta(seconds=GENERATION_TIMEOUT),
         )
         db.add(generation)
-        
-        # 7. CREATE TRANSACTION RECORD (for audit)
-        transaction = Transaction(
-            user_id=user.id,
-            type=TransactionType.GENERATION,
-            amount=-price,
-            reference_id=None,  # Will update after flush
-            description=f"Generation: {request.model_name}",
-        )
-        db.add(transaction)
-        
-        await db.flush()
-        transaction.reference_id = generation.id
+
         await db.commit()
         
         logger.info(
@@ -247,7 +235,6 @@ class GenerationService:
             user_id=user.id,
             model=request.model_id,
             price=price,
-            new_balance=new_balance,
         )
         
         # 8. RETURN RESPONSE
@@ -259,7 +246,6 @@ class GenerationService:
             "message": "Генерация началась! Результат придёт в Telegram.",
             "credits_charged": price,
             "estimated_time": estimated_time,
-            "new_balance": new_balance,
         }
     
     # ========== BACKGROUND PROCESSING ==========
@@ -363,13 +349,22 @@ class GenerationService:
                 
                 generation.aiml_task_id = task_id
                 await db.commit()
-                
+
+                # Charge after successful AIML acceptance
+                try:
+                    await self._charge_generation(db, generation)
+                except InsufficientCreditsError as e:
+                    await self._handle_generation_failure(
+                        db, generation, "Insufficient credits at processing time"
+                    )
+                    return
+
                 # Wait for completion (with timeout)
                 final_result = await aiml_client.wait_for_video(
                     task_id,
                     max_wait=GENERATION_TIMEOUT,
                 )
-                
+
                 result_url = (
                     final_result.get("video", {}).get("url") or
                     final_result.get("output", {}).get("video_url") or
@@ -379,6 +374,16 @@ class GenerationService:
             if not result_url:
                 raise Exception("No result URL in AIML response")
             
+            # Charge for image after successful AIML response
+            if generation.generation_type == "image":
+                try:
+                    await self._charge_generation(db, generation)
+                except InsufficientCreditsError:
+                    await self._handle_generation_failure(
+                        db, generation, "Insufficient credits at processing time"
+                    )
+                    return
+
             # 6. UPDATE TO COMPLETED
             generation.status = GenerationStatus.COMPLETED
             generation.result_url = result_url
@@ -441,40 +446,97 @@ class GenerationService:
         generation.error_message = error_message
         generation.completed_at = datetime.utcnow()
         
-        # Refund credits
-        user = await db.get(User, generation.user_id)
-        if user:
-            user.credits += generation.credits_charged
-            
-            # Create refund transaction (audit trail)
-            refund = Transaction(
-                user_id=user.id,
-                type=TransactionType.REFUND,
-                amount=generation.credits_charged,
-                reference_id=generation.id,
-                description=f"Refund for failed generation #{generation.id}",
-            )
-            db.add(refund)
-        
+        credits_refunded = 0
+
+        # Refund credits only if charged
+        charged = await self._has_generation_charge(db, generation.id)
+        if charged:
+            user = await db.get(User, generation.user_id)
+            if user:
+                user.credits += generation.credits_charged
+                credits_refunded = generation.credits_charged
+
+                refund = Transaction(
+                    user_id=user.id,
+                    type=TransactionType.REFUND,
+                    amount=generation.credits_charged,
+                    reference_id=generation.id,
+                    description=f"Refund for failed generation #{generation.id}",
+                )
+                db.add(refund)
+
         await db.commit()
-        
+
         logger.info(
-            "Generation failed, credits refunded",
+            "Generation failed",
             generation_id=generation.id,
             user_id=generation.user_id,
-            credits_refunded=generation.credits_charged,
+            credits_refunded=credits_refunded,
         )
         
         # Notify user
         try:
+            if credits_refunded:
+                user_message = "Произошла ошибка при генерации. Кредиты возвращены."
+            else:
+                user_message = "Произошла ошибка при генерации."
             await telegram_service.send_generation_error(
                 user_id=generation.user_id,
                 model_name=generation.model_name,
-                error_message="Произошла ошибка при генерации. Кредиты возвращены.",
-                credits_refunded=generation.credits_charged,
+                error_message=user_message,
+                credits_refunded=credits_refunded,
             )
         except Exception as e:
             logger.error("Notification failed (error)", error=str(e))
+
+    async def _has_generation_charge(self, db: AsyncSession, generation_id: int) -> bool:
+        stmt = select(func.count(Transaction.id)).where(
+            and_(
+                Transaction.type == TransactionType.GENERATION,
+                Transaction.reference_id == generation_id,
+            )
+        )
+        count = await db.scalar(stmt)
+        return bool(count)
+
+    async def _charge_generation(self, db: AsyncSession, generation: Generation) -> None:
+        """
+        Charge credits for generation after successful AIML acceptance.
+        """
+        already_charged = await self._has_generation_charge(db, generation.id)
+        if already_charged:
+            return
+
+        price = generation.credits_charged
+        stmt = (
+            update(User)
+            .where(
+                User.id == generation.user_id,
+                User.credits >= price,
+            )
+            .values(
+                credits=User.credits - price,
+                total_spent_credits=User.total_spent_credits + price,
+                total_generations=User.total_generations + 1,
+                last_active_at=datetime.utcnow(),
+            )
+            .returning(User.credits)
+        )
+
+        result = await db.execute(stmt)
+        new_balance = result.scalar_one_or_none()
+        if new_balance is None:
+            raise InsufficientCreditsError(required=price, available=0)
+
+        transaction = Transaction(
+            user_id=generation.user_id,
+            type=TransactionType.GENERATION,
+            amount=-price,
+            reference_id=generation.id,
+            description=f"Generation: {generation.model_name}",
+        )
+        db.add(transaction)
+        await db.commit()
     
     # ========== CANCELLATION ==========
     
@@ -507,19 +569,23 @@ class GenerationService:
         generation.completed_at = datetime.utcnow()
         generation.error_message = "Cancelled by user"
         
-        # Refund credits
-        user = await db.get(User, user_id)
-        if user:
-            user.credits += generation.credits_charged
-            
-            refund = Transaction(
-                user_id=user.id,
-                type=TransactionType.REFUND,
-                amount=generation.credits_charged,
-                reference_id=generation.id,
-                description=f"Refund for cancelled generation #{generation.id}",
-            )
-            db.add(refund)
+        # Refund credits only if charged
+        credits_refunded = 0
+        charged = await self._has_generation_charge(db, generation.id)
+        if charged:
+            user = await db.get(User, user_id)
+            if user:
+                user.credits += generation.credits_charged
+                credits_refunded = generation.credits_charged
+
+                refund = Transaction(
+                    user_id=user.id,
+                    type=TransactionType.REFUND,
+                    amount=generation.credits_charged,
+                    reference_id=generation.id,
+                    description=f"Refund for cancelled generation #{generation.id}",
+                )
+                db.add(refund)
         
         await db.commit()
         
@@ -528,13 +594,13 @@ class GenerationService:
             generation_id=generation_id,
             user_id=user_id,
             old_status=old_status.value,
-            credits_refunded=generation.credits_charged,
+            credits_refunded=credits_refunded,
         )
         
         return {
             "id": generation.id,
             "status": "cancelled",
-            "credits_refunded": generation.credits_charged,
+            "credits_refunded": credits_refunded,
             "new_balance": user.credits,
         }
 

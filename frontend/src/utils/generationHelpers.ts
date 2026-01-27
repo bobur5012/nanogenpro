@@ -12,6 +12,7 @@ export interface GenerationRequestData {
   negative_prompt?: string;
   parameters?: Record<string, any>;
   image_url?: string;
+  image_base64?: string;
   idempotency_key?: string;
 }
 

@@ -170,7 +170,7 @@ export const CreateWanView: React.FC<CreateWanViewProps> = ({ userCredits, onOpe
                 model_name: 'Wan 2.5',
                 generation_type: 'video',
                 prompt: prompt.trim(),
-                image_url: mode === 'image' && image ? image : undefined,
+                image_base64: mode === 'image' && image ? image : undefined,
                 parameters: {
                     duration: `${duration}s`,
                     resolution: resolution,

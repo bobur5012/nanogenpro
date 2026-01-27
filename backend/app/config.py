@@ -27,6 +27,16 @@ class Settings(BaseSettings):
     # ========== AIML API ==========
     aiml_api_key: str
     aiml_api_base_url: str = "https://api.aimlapi.com/v2"
+
+    # ========== STORAGE (S3 Compatible) ==========
+    storage_endpoint_url: str
+    storage_region: str = "auto"
+    storage_bucket_name: str
+    storage_access_key_id: str
+    storage_secret_access_key: str
+    storage_public_base_url: Optional[str] = None
+    storage_signed_url_expires: int = 3600  # seconds
+    max_image_upload_mb: int = 10
     
     # ========== WEB APP ==========
     webapp_url: str = "https://app.nanogen.ai"

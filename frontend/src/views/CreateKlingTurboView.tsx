@@ -131,7 +131,7 @@ export const CreateKlingTurboView: React.FC<CreateKlingTurboViewProps> = ({ user
                 generation_type: 'video',
                 prompt: prompt.trim(),
                 negative_prompt: negativePrompt.trim() || undefined,
-                image_url: mode === 'image' && image ? image : undefined,
+                image_base64: mode === 'image' && image ? image : undefined,
                 parameters: {
                     duration: `${duration}s`,
                     aspect_ratio: aspectRatio,

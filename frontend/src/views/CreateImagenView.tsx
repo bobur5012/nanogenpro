@@ -147,7 +147,7 @@ export const CreateImagenView: React.FC<CreateImagenViewProps> = ({ userCredits,
                 model_name: 'Imagen 4',
                 generation_type: 'image',
                 prompt: prompt.trim(),
-                image_url: imageUrl,
+                image_base64: imageUrl,
                 parameters: {
                     mode: mode,
                     aspect_ratio: aspectRatio,

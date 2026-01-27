@@ -148,7 +148,7 @@ export const CreateVeoView: React.FC<CreateVeoViewProps> = ({ userCredits, onOpe
                 model_name: 'Veo 3.1',
                 generation_type: 'video',
                 prompt: prompt.trim(),
-                image_url: imageUrl,
+                image_base64: imageUrl,
                 parameters: {
                     mode: mode,
                     duration: `${duration}s`,

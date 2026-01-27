@@ -177,7 +177,7 @@ export const CreateKlingO1View: React.FC<CreateKlingO1ViewProps> = ({ userCredit
               model_name: 'Kling O1',
               generation_type: 'video',
               prompt: prompt.trim() || 'Generate video',
-              image_url: imageUrl,
+              image_base64: imageUrl,
               parameters: {
                   duration: `${duration}s`,
                   aspect_ratio: aspectRatio,

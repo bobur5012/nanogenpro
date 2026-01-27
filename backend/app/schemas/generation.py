@@ -26,6 +26,9 @@ class GenerationRequest(BaseModel):
     
     # For image-to-video
     image_url: Optional[str] = None
+
+    # Raw image input (base64 or data URL)
+    image_base64: Optional[str] = None
     
     # Idempotency protection (client-generated UUID)
     idempotency_key: Optional[str] = Field(None, max_length=64)

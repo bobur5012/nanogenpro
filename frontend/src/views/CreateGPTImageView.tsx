@@ -150,7 +150,7 @@ export const CreateGPTImageView: React.FC<CreateGPTImageViewProps> = ({ userCred
                 model_name: 'GPT Image 1.5',
                 generation_type: 'image',
                 prompt: prompt.trim(),
-                image_url: imageUrl,
+                image_base64: imageUrl,
                 parameters: {
                     mode: mode,
                     size,

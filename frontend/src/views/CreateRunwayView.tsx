@@ -140,7 +140,7 @@ export const CreateRunwayView: React.FC<CreateRunwayViewProps> = ({ userCredits,
                 model_name: 'Runway Gen-4 Turbo',
                 generation_type: 'video',
                 prompt: prompt.trim(),
-                image_url: imageUrl,
+                image_base64: imageUrl,
                 parameters: {
                     mode: mode,
                     duration: `${duration}s`,

@@ -176,7 +176,7 @@ export const CreateSeedanceView: React.FC<CreateSeedanceViewProps> = ({ userCred
                 model_name: 'Seedance 1 Lite',
                 generation_type: 'video',
                 prompt: prompt.trim(),
-                image_url: imageUrl,
+                image_base64: imageUrl,
                 parameters: {
                     mode: mode,
                     duration: `${duration}s`,

@@ -166,7 +166,7 @@ export const CreateWan26View: React.FC<CreateWan26ViewProps> = ({ userCredits, o
                 model_name: 'Wan 2.6 Turbo',
                 generation_type: 'video',
                 prompt: prompt.trim(),
-                image_url: imageUrl,
+                image_base64: imageUrl,
                 parameters: {
                     mode: mode,
                     duration: mode === 'reference' ? `${refDuration}s` : `${duration}s`,

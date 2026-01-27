@@ -19,7 +19,7 @@ export const getDB = (): SimDB => {
   // Default State
   return {
     user: null,
-    credits: 500, // Trial start
+    credits: 0, // Trial start
     isTrialUsed: false,
     history: [],
     referralStats: {

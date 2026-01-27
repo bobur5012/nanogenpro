@@ -1,12 +1,13 @@
 """
 Generation API endpoints
 """
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, UploadFile, File, Form
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.schemas.generation import GenerationRequest, GenerationResponse
 from app.services.generation import generation_service
+from app.services.storage import StorageUploadError, storage_service
 from app.services.user import user_service
 from app.services.telegram import telegram_service
 from app.api.deps import require_current_user
@@ -14,6 +15,7 @@ from app.schemas.user import TelegramUser
 from app.config import settings
 import structlog
 from datetime import datetime
+import json
 
 logger = structlog.get_logger()
 router = APIRouter(prefix="/api/generation", tags=["Generation"])
@@ -92,6 +94,14 @@ async def start_generation(
         
         return result
         
+    except StorageUploadError as e:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": "UPLOAD_FAILED",
+                "message": str(e),
+            }
+        )
     except Exception as e:
         # Handle custom exceptions with proper HTTP codes
         if hasattr(e, 'http_status') and hasattr(e, 'code'):
@@ -112,6 +122,65 @@ async def start_generation(
                 "message": "Внутренняя ошибка сервера",
             }
         )
+
+
+@router.post("/start-file", response_model=dict)
+async def start_generation_with_file(
+    payload: str = Form(...),
+    image: UploadFile = File(...),
+    background_tasks: BackgroundTasks = None,
+    current_user=Depends(require_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Start generation with multipart file upload.
+    Payload is JSON string of GenerationRequest fields.
+    """
+    try:
+        data = GenerationRequest.model_validate_json(payload)
+
+        if data.user_id != current_user.id:
+            raise HTTPException(status_code=403, detail="Not authorized")
+
+        image_bytes = await image.read()
+        if not image_bytes:
+            raise HTTPException(status_code=400, detail="Empty image file")
+
+        image_url = storage_service.upload_image_bytes(
+            image_bytes,
+            prefix=f"uploads/{data.user_id}",
+        )
+
+        params = dict(data.parameters or {})
+        params["image_url"] = image_url
+        data.parameters = params
+        data.image_base64 = None
+        data.image_url = None
+
+        result = await generation_service.start_generation(
+            db,
+            data,
+            idempotency_key=data.idempotency_key,
+        )
+
+        if background_tasks is not None:
+            background_tasks.add_task(
+                process_generation_background,
+                generation_id=result["id"],
+            )
+
+        return result
+
+    except StorageUploadError as e:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": "UPLOAD_FAILED",
+                "message": str(e),
+            }
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 async def process_generation_background(generation_id: int):
@@ -147,19 +216,30 @@ async def process_generation_background(generation_id: int):
                         gen.error_message = "Internal server error (background task crashed)"
                         gen.completed_at = datetime.utcnow()
                         
-                        # Refund credits
-                        user = await fallback_db.get(User, gen.user_id)
-                        if user:
-                            user.credits += gen.credits_charged
-                            
-                            refund = Transaction(
-                                user_id=user.id,
-                                type=TransactionType.REFUND,
-                                amount=gen.credits_charged,
-                                reference_id=generation_id,
-                                description=f"Emergency refund for crashed generation #{generation_id}",
+                        # Refund credits only if charged
+                        from sqlalchemy import select, func, and_
+                        charged = await fallback_db.scalar(
+                            select(func.count(Transaction.id)).where(
+                                and_(
+                                    Transaction.type == TransactionType.GENERATION,
+                                    Transaction.reference_id == generation_id,
+                                )
                             )
-                            fallback_db.add(refund)
+                        )
+
+                        if charged:
+                            user = await fallback_db.get(User, gen.user_id)
+                            if user:
+                                user.credits += gen.credits_charged
+
+                                refund = Transaction(
+                                    user_id=user.id,
+                                    type=TransactionType.REFUND,
+                                    amount=gen.credits_charged,
+                                    reference_id=generation_id,
+                                    description=f"Emergency refund for crashed generation #{generation_id}",
+                                )
+                                fallback_db.add(refund)
                         
                         await fallback_db.commit()
                         

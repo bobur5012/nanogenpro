@@ -117,7 +117,7 @@ export const CreateKlingImg2VideoView: React.FC<CreateKlingImg2VideoViewProps> =
         generation_type: 'video',
         prompt: prompt.trim() || 'Transform this image into a video',
         negative_prompt: negativePrompt.trim() || undefined,
-        image_url: image, // Pass full data URL
+        image_base64: image, // Pass full data URL
         parameters: {
           duration: `${duration}s`,
           aspect_ratio: aspectRatio,

@@ -142,7 +142,7 @@ export const CreateNanoBananaView: React.FC<CreateNanoBananaViewProps> = ({ user
                 model_name: 'Nano Banana',
                 generation_type: 'image',
                 prompt: prompt.trim(),
-                image_url: imageUrl,
+                image_base64: imageUrl,
                 parameters: {
                     mode: mode,
                     aspect_ratio: aspectRatio,
