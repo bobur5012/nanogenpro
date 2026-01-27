@@ -22,10 +22,12 @@ import { CreateNanoBananaView } from './views/CreateNanoBananaView';
 import { ProfileView } from './views/ProfileView';
 import { PaymentView } from './views/PaymentView';
 import { ReferralView } from './views/ReferralView';
+import { AdminView } from './views/AdminView';
 import { DebugHub } from './views/DebugHub';
 
 // Utils
 import * as Sim from './utils/simulation';
+import { userAPI } from './utils/api';
 
 // Placeholder for Upscale (not yet implemented)
 const UpscaleView: React.FC<{ userCredits: number; onOpenProfile: () => void }> = ({ userCredits, onOpenProfile }) => (
@@ -66,9 +68,10 @@ const App: React.FC = () => {
         tg.MainButton.hide();
 
         const tgUser = tg.initDataUnsafe?.user;
-        const db = Sim.initUser(tgUser);
-        setUser(db.user);
-        setCredits(db.credits);
+        setUser(tgUser || null);
+        
+        // Load user data from API
+        loadUserData();
 
         // Support both URL path and query params for routing
         const path = window.location.pathname;
@@ -116,6 +119,27 @@ const App: React.FC = () => {
         tg.BackButton.show();
     }
   }, []);
+
+  const loadUserData = async () => {
+    try {
+      const response = await userAPI.auth();
+      setUser(response.user || window.Telegram?.WebApp?.initDataUnsafe?.user || null);
+      setCredits(response.credits || 0);
+    } catch (error) {
+      console.error('Failed to load user data:', error);
+      // Fallback to simulation for development
+      const tgUser = window.Telegram?.WebApp?.initDataUnsafe?.user;
+      if (tgUser) {
+        const db = Sim.initUser(tgUser);
+        setUser(db.user);
+        setCredits(db.credits);
+      }
+    }
+  };
+
+  const handleCreditsUpdate = (newCredits: number) => {
+    setCredits(newCredits);
+  };
 
   useEffect(() => {
       const tg = window.Telegram?.WebApp;
@@ -196,12 +220,15 @@ const App: React.FC = () => {
                         credits={credits} 
                         onNavigateToPayment={handlePayment} 
                         onNavigateToReferral={() => setScreen('referral')}
+                        onCreditsUpdate={handleCreditsUpdate}
                      />;
           case 'referral':
               return <ReferralView 
                         onBack={() => setScreen('profile')} 
                         userCredits={credits} 
                      />;
+          case 'admin':
+              return <AdminView onBack={() => setScreen('profile')} />;
           case 'payment':
               return <PaymentView 
                         amount={paymentData?.amount || 0} 

@@ -12,11 +12,14 @@ import {
     AlertCircle, 
     Zap,
     Film,
-    Plus
+    Plus,
+    CheckCircle
 } from 'lucide-react';
 import { Button } from '../components/Button';
 import { BalanceDisplay } from '../components/BalanceDisplay';
 import { triggerHaptic, triggerSelection, triggerNotification } from '../utils/haptics';
+import { generationAPI } from '../utils/api';
+import { getTelegramUserData, generateIdempotencyKey } from '../utils/generationHelpers';
 
 interface CreateKlingO1ViewProps {
   userCredits: number;
@@ -55,6 +58,8 @@ export const CreateKlingO1View: React.FC<CreateKlingO1ViewProps> = ({ userCredit
   const [aspectRatio, setAspectRatio] = useState('16:9');
   const [resolution, setResolution] = useState('1080p');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState(false);
 
   const [sourceImage, setSourceImage] = useState<string | null>(null);
   const [sourceVideo, setSourceVideo] = useState<string | null>(null);
@@ -130,29 +135,88 @@ export const CreateKlingO1View: React.FC<CreateKlingO1ViewProps> = ({ userCredit
       setRefImages(prev => prev.filter((_, i) => i !== index));
   };
 
-  const handleSubmit = () => {
-      if (!canAfford || !isValid) {
-          triggerNotification('error');
+  const handleSubmit = async () => {
+      if (!canAfford || !isValid || isSubmitting) {
+          if (!isValid) triggerNotification('error');
           return;
       }
+      
       setIsSubmitting(true);
+      setError(null);
+      setSuccess(false);
       triggerHaptic('medium');
 
-      setTimeout(() => {
-        const payload = {
-            type: 'video_gen',
-            payload: {
-                model: `kling-o1-${mode}`,
-                prompt,
-                duration: `${duration}s`,
-                cost: costCredits,
-                source_image_id: sourceImage ? 'mock_id' : undefined,
-                source_video_id: sourceVideo ? 'mock_id' : undefined,
-                ref_images_ids: refImages.length ? ['mock_ids'] : undefined
-            }
-        };
-        window.Telegram.WebApp.sendData(JSON.stringify(payload));
-      }, 2000);
+      try {
+          const userData = getTelegramUserData();
+          if (!userData) {
+              throw new Error('Telegram данные не найдены');
+          }
+
+          // Determine model_id based on mode
+          let modelId = 'kling-video/v1.6/pro/text-to-video'; // Default
+          let imageUrl: string | undefined = undefined;
+          
+          if (mode === 'img2vid' && sourceImage) {
+              modelId = 'kling-video/v2.0/master/image-to-video';
+              imageUrl = sourceImage;
+          } else if (mode === 'vid2edit' && sourceVideo) {
+              // Video editing - use same model
+              imageUrl = sourceVideo;
+          } else if (mode === 'ref2vid' && refImages.length > 0) {
+              // Reference images - use first image
+              imageUrl = refImages[0];
+          } else if (mode === 'vidref' && sourceVideo) {
+              imageUrl = sourceVideo;
+          }
+
+          const result = await generationAPI.start({
+              user_id: userData.userId,
+              init_data: userData.initData,
+              model_id: modelId,
+              model_name: 'Kling O1',
+              generation_type: 'video',
+              prompt: prompt.trim() || 'Generate video',
+              image_url: imageUrl,
+              parameters: {
+                  duration: `${duration}s`,
+                  aspect_ratio: aspectRatio,
+                  resolution: resolution,
+                  mode: mode,
+              },
+              idempotency_key: generateIdempotencyKey(),
+          });
+
+          setSuccess(true);
+          triggerNotification('success');
+
+          setTimeout(() => {
+              onOpenProfile();
+          }, 2000);
+
+      } catch (err: any) {
+          console.error('Generation failed:', err);
+          let errorMessage = 'Не удалось запустить генерацию. Попробуйте позже.';
+          
+          if (err.message) {
+              try {
+                  const errorData = JSON.parse(err.message);
+                  errorMessage = errorData.message || errorData.detail || errorMessage;
+              } catch {
+                  errorMessage = err.message;
+              }
+          }
+          
+          setError(errorMessage);
+          triggerNotification('error');
+          
+          if (errorMessage.includes('кредит') || errorMessage.includes('баланс') || errorMessage.includes('INSUFFICIENT')) {
+              setTimeout(() => {
+                  onOpenProfile();
+              }, 3000);
+          }
+      } finally {
+          setIsSubmitting(false);
+      }
   };
 
   const renderUploadBox = (

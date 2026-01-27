@@ -1,8 +1,10 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Image as ImageIcon, Video, Music, AlertCircle, Coins, Clock, Zap, Mic, Upload, Trash2, Smartphone, Monitor, Square, Film } from 'lucide-react';
+import { Image as ImageIcon, Video, Music, AlertCircle, Coins, Clock, Zap, Mic, Upload, Trash2, Smartphone, Monitor, Square, Film, CheckCircle } from 'lucide-react';
 import { Button } from '../components/Button';
 import { BalanceDisplay } from '../components/BalanceDisplay';
 import { triggerHaptic, triggerSelection, triggerNotification } from '../utils/haptics';
+import { generationAPI } from '../utils/api';
+import { getTelegramUserData, generateIdempotencyKey } from '../utils/generationHelpers';
 
 interface CreateKlingImg2VideoViewProps {
   userCredits: number;
@@ -27,6 +29,8 @@ export const CreateKlingImg2VideoView: React.FC<CreateKlingImg2VideoViewProps> =
   const [aspectRatio, setAspectRatio] = useState('16:9');
   const [isAudioEnabled, setIsAudioEnabled] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState(false);
   
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -84,31 +88,74 @@ export const CreateKlingImg2VideoView: React.FC<CreateKlingImg2VideoViewProps> =
       setIsAudioEnabled(!isAudioEnabled);
   };
 
-  const handleSubmit = () => {
-    if (!canAfford || !isValid) {
-        triggerNotification('error');
+  const handleSubmit = async () => {
+    if (!canAfford || !isValid || isSubmitting || !image) {
+        if (!image) triggerNotification('error');
         return;
     }
 
     setIsSubmitting(true);
+    setError(null);
+    setSuccess(false);
     triggerHaptic('medium');
     
-    setTimeout(() => {
-        const payload = {
-            type: 'video_gen',
-            payload: {
-                model: 'kling-2.6-pro-i2v',
-                prompt,
-                negative_prompt: negativePrompt,
-                image_data: 'base64_truncated',
-                duration: `${duration}s`,
-                ratio: aspectRatio,
-                audio: isAudioEnabled,
-                cost: costCredits
-            }
-        };
-        window.Telegram.WebApp.sendData(JSON.stringify(payload));
-    }, 2000);
+    try {
+      const userData = getTelegramUserData();
+      if (!userData) {
+        throw new Error('Telegram данные не найдены');
+      }
+
+      // Extract base64 data from image (remove data:image/...;base64, prefix)
+      const base64Data = image.includes(',') ? image.split(',')[1] : image;
+      
+      const result = await generationAPI.start({
+        user_id: userData.userId,
+        init_data: userData.initData,
+        model_id: 'kling-video/v2.0/master/image-to-video',
+        model_name: 'Kling 2.6 Pro (Image to Video)',
+        generation_type: 'video',
+        prompt: prompt.trim() || 'Transform this image into a video',
+        negative_prompt: negativePrompt.trim() || undefined,
+        image_url: image, // Pass full data URL
+        parameters: {
+          duration: `${duration}s`,
+          aspect_ratio: aspectRatio,
+          audio: isAudioEnabled,
+        },
+        idempotency_key: generateIdempotencyKey(),
+      });
+
+      setSuccess(true);
+      triggerNotification('success');
+
+      setTimeout(() => {
+        onOpenProfile();
+      }, 2000);
+
+    } catch (err: any) {
+      console.error('Generation failed:', err);
+      let errorMessage = 'Не удалось запустить генерацию. Попробуйте позже.';
+      
+      if (err.message) {
+        try {
+          const errorData = JSON.parse(err.message);
+          errorMessage = errorData.message || errorData.detail || errorMessage;
+        } catch {
+          errorMessage = err.message;
+        }
+      }
+      
+      setError(errorMessage);
+      triggerNotification('error');
+      
+      if (errorMessage.includes('кредит') || errorMessage.includes('баланс') || errorMessage.includes('INSUFFICIENT')) {
+        setTimeout(() => {
+          onOpenProfile();
+        }, 3000);
+      }
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -276,6 +323,27 @@ export const CreateKlingImg2VideoView: React.FC<CreateKlingImg2VideoViewProps> =
                 />
             </div>
         </div>
+
+        {/* Error/Success Messages */}
+        {error && (
+          <div className="bg-[#2A1515] border border-[#441111] rounded-xl p-4 flex items-start gap-3">
+            <AlertCircle size={20} className="text-[#FF4D4D] shrink-0 mt-0.5" />
+            <div className="flex-1">
+              <p className="text-[#FF4D4D] text-sm font-bold mb-1">Ошибка</p>
+              <p className="text-[#A0A0A0] text-xs">{error}</p>
+            </div>
+          </div>
+        )}
+
+        {success && (
+          <div className="bg-[#1A4D3A] border border-[#2d7a5a] rounded-xl p-4 flex items-start gap-3">
+            <CheckCircle size={20} className="text-[#22C55E] shrink-0 mt-0.5" />
+            <div className="flex-1">
+              <p className="text-[#22C55E] text-sm font-bold mb-1">Генерация запущена!</p>
+              <p className="text-[#A0A0A0] text-xs">Результат придёт в Telegram</p>
+            </div>
+          </div>
+        )}
 
         {/* Cost Preview Section */}
         <div className="bg-[#15151A] border border-[#24242A] rounded-2xl p-4 space-y-3">

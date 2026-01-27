@@ -2,11 +2,13 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { 
     Video, Image as ImageIcon, Monitor, Smartphone, Square, 
     Upload, Trash2, Coins, AlertTriangle, Mic, Music, Volume2,
-    Move, Maximize, ArrowUp, ArrowRight, Focus, Film, Type, Check
+    Move, Maximize, ArrowUp, ArrowRight, Focus, Film, Type, Check, CheckCircle, AlertCircle
 } from 'lucide-react';
 import { Button } from '../components/Button';
 import { BalanceDisplay } from '../components/BalanceDisplay';
 import { triggerHaptic, triggerSelection, triggerNotification } from '../utils/haptics';
+import { generationAPI } from '../utils/api';
+import { getTelegramUserData, generateIdempotencyKey } from '../utils/generationHelpers';
 
 interface CreateWanViewProps {
   userCredits: number;
@@ -63,6 +65,8 @@ export const CreateWanView: React.FC<CreateWanViewProps> = ({ userCredits, onOpe
     }>({ voice: false, music: false, sfx: false });
 
     const [isSubmitting, setIsSubmitting] = useState(false);
+    const [error, setError] = useState<string | null>(null);
+    const [success, setSuccess] = useState(false);
     const fileInputRef = useRef<HTMLInputElement>(null);
     const uploadTypeRef = useRef<'image' | 'voice' | 'music' | 'sfx' | null>(null);
 
@@ -141,31 +145,72 @@ export const CreateWanView: React.FC<CreateWanViewProps> = ({ userCredits, onOpe
         return true;
     }, [mode, image, prompt]);
 
-    const handleSubmit = () => {
-        if (!canAfford || !isValid) {
-            triggerNotification('error');
+    const handleSubmit = async () => {
+        if (!canAfford || !isValid || isSubmitting) {
+            if (!isValid) triggerNotification('error');
             return;
         }
+        
         setIsSubmitting(true);
+        setError(null);
+        setSuccess(false);
         triggerHaptic('medium');
 
-        setTimeout(() => {
-            const payload = {
-                type: 'video_gen',
-                payload: {
-                    model: `wan-2.5-${mode}`,
-                    prompt,
-                    image_data: image ? 'base64_truncated' : undefined,
+        try {
+            const userData = getTelegramUserData();
+            if (!userData) {
+                throw new Error('Telegram данные не найдены');
+            }
+
+            const result = await generationAPI.start({
+                user_id: userData.userId,
+                init_data: userData.initData,
+                model_id: 'wan-ai/wan2.1-t2v-turbo',
+                model_name: 'Wan 2.5',
+                generation_type: 'video',
+                prompt: prompt.trim(),
+                image_url: mode === 'image' && image ? image : undefined,
+                parameters: {
                     duration: `${duration}s`,
-                    resolution,
-                    ratio: aspectRatio,
+                    resolution: resolution,
+                    aspect_ratio: aspectRatio,
                     camera_controls: camera,
                     audio_config: audioFiles,
-                    cost: costCredits
+                },
+                idempotency_key: generateIdempotencyKey(),
+            });
+
+            setSuccess(true);
+            triggerNotification('success');
+
+            setTimeout(() => {
+                onOpenProfile();
+            }, 2000);
+
+        } catch (err: any) {
+            console.error('Generation failed:', err);
+            let errorMessage = 'Не удалось запустить генерацию. Попробуйте позже.';
+            
+            if (err.message) {
+                try {
+                    const errorData = JSON.parse(err.message);
+                    errorMessage = errorData.message || errorData.detail || errorMessage;
+                } catch {
+                    errorMessage = err.message;
                 }
-            };
-            window.Telegram.WebApp.sendData(JSON.stringify(payload));
-        }, 2000);
+            }
+            
+            setError(errorMessage);
+            triggerNotification('error');
+            
+            if (errorMessage.includes('кредит') || errorMessage.includes('баланс') || errorMessage.includes('INSUFFICIENT')) {
+                setTimeout(() => {
+                    onOpenProfile();
+                }, 3000);
+            }
+        } finally {
+            setIsSubmitting(false);
+        }
     };
 
     return (

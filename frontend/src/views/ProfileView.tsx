@@ -1,22 +1,51 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { TelegramUser } from '../types';
 import { Gem, Shield, Image as ImageIcon, Video, CreditCard, Users, MessageCircle } from 'lucide-react';
 import { triggerHaptic, triggerSelection } from '../utils/haptics';
 import { ModelHeader } from '../components/ModelHeader';
+import { userAPI } from '../utils/api';
 
 interface ProfileViewProps {
   user: TelegramUser | null;
   credits: number;
   onNavigateToPayment: (amount: number, price: number) => void;
   onNavigateToReferral?: () => void;
+  onCreditsUpdate?: (newCredits: number) => void;
 }
 
 const PRESETS = [10, 50, 100];
 const RATE = 1000; // 1 Diamond = 1000 UZS
 
-export const ProfileView: React.FC<ProfileViewProps> = ({ user, credits, onNavigateToPayment, onNavigateToReferral }) => {
+export const ProfileView: React.FC<ProfileViewProps> = ({ user, credits, onNavigateToPayment, onNavigateToReferral, onCreditsUpdate }) => {
   const [customAmount, setCustomAmount] = useState<string>('');
   const [selectedPreset, setSelectedPreset] = useState<number | null>(null);
+  const [currentCredits, setCurrentCredits] = useState<number>(credits);
+  const [isLoadingBalance, setIsLoadingBalance] = useState(false);
+
+  // Load balance from API when component mounts or user changes
+  useEffect(() => {
+    if (user?.id) {
+      loadBalance();
+    }
+  }, [user?.id]);
+
+  const loadBalance = async () => {
+    if (!user?.id) return;
+    
+    setIsLoadingBalance(true);
+    try {
+      const balance = await userAPI.getBalance(user.id);
+      setCurrentCredits(balance.credits);
+      if (onCreditsUpdate) {
+        onCreditsUpdate(balance.credits);
+      }
+    } catch (error) {
+      console.error('Failed to load balance:', error);
+      // Keep current credits on error
+    } finally {
+      setIsLoadingBalance(false);
+    }
+  };
 
   const initials = user?.first_name ? user.first_name.charAt(0).toUpperCase() : '?';
 
@@ -89,7 +118,9 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ user, credits, onNavig
             <div className="flex-1">
               <div className="text-[#a5b4fc] text-xs font-bold uppercase tracking-wider mb-2">БАЛАНС</div>
               <div className="flex items-center gap-2">
-                <span className="text-4xl font-bold text-white">{credits}</span>
+                <span className="text-4xl font-bold text-white">
+                  {isLoadingBalance ? '...' : currentCredits}
+                </span>
                 <Gem size={28} className="text-[#3b82f6]" fill="#3b82f6" fillOpacity={0.9} />
               </div>
             </div>
@@ -108,14 +139,14 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ user, credits, onNavig
             <div className="bg-[#15151A] border border-[#24242A] rounded-xl p-3 flex items-center justify-between">
                 <div className="flex items-center gap-2 text-[#A0A0A0]">
                     <ImageIcon size={14} />
-                    <span className="text-xs font-bold">~ {Math.floor(credits / 2)}</span>
+                    <span className="text-xs font-bold">~ {Math.floor(currentCredits / 2)}</span>
                 </div>
                 <span className="text-[10px] text-[#505055] uppercase font-bold">IMG</span>
             </div>
             <div className="bg-[#15151A] border border-[#24242A] rounded-xl p-3 flex items-center justify-between">
                 <div className="flex items-center gap-2 text-[#A0A0A0]">
                     <Video size={14} />
-                    <span className="text-xs font-bold">~ {Math.floor(credits / 7)}</span>
+                    <span className="text-xs font-bold">~ {Math.floor(currentCredits / 7)}</span>
                 </div>
                 <span className="text-[10px] text-[#505055] uppercase font-bold">VIDEO</span>
             </div>

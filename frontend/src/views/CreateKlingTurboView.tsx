@@ -1,11 +1,13 @@
 import React, { useState, useRef, useMemo, useEffect } from 'react';
 import { 
     Video, Image as ImageIcon, Zap, Monitor, Smartphone, Square, 
-    Upload, Trash2, Sliders, AlertCircle, Coins, Clock 
+    Upload, Trash2, Sliders, AlertCircle, Coins, Clock, CheckCircle
 } from 'lucide-react';
 import { Button } from '../components/Button';
 import { BalanceDisplay } from '../components/BalanceDisplay';
 import { triggerHaptic, triggerSelection, triggerNotification } from '../utils/haptics';
+import { generationAPI } from '../utils/api';
+import { getTelegramUserData, generateIdempotencyKey } from '../utils/generationHelpers';
 
 interface CreateKlingTurboViewProps {
   userCredits: number;
@@ -37,6 +39,8 @@ export const CreateKlingTurboView: React.FC<CreateKlingTurboViewProps> = ({ user
     const [image, setImage] = useState<string | null>(null);
     const [cfgScale, setCfgScale] = useState(0.5);
     const [isSubmitting, setIsSubmitting] = useState(false);
+    const [error, setError] = useState<string | null>(null);
+    const [success, setSuccess] = useState(false);
 
     const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -101,31 +105,71 @@ export const CreateKlingTurboView: React.FC<CreateKlingTurboViewProps> = ({ user
         }
     };
 
-    const handleSubmit = () => {
-        if (!canAfford || !isValid) {
-            triggerNotification('error');
+    const handleSubmit = async () => {
+        if (!canAfford || !isValid || isSubmitting) {
+            if (!isValid) triggerNotification('error');
             return;
         }
+        
         setIsSubmitting(true);
+        setError(null);
+        setSuccess(false);
         triggerHaptic('medium');
 
-        setTimeout(() => {
-            const payload = {
-                type: 'video_gen',
-                payload: {
-                    model: 'kling-2.5-turbo-pro',
-                    mode,
-                    prompt,
-                    negative_prompt: negativePrompt,
+        try {
+            const userData = getTelegramUserData();
+            if (!userData) {
+                throw new Error('Telegram данные не найдены');
+            }
+
+            const result = await generationAPI.start({
+                user_id: userData.userId,
+                init_data: userData.initData,
+                model_id: 'kling-video/v1.5/pro/text-to-video',
+                model_name: 'Kling Turbo Pro',
+                generation_type: 'video',
+                prompt: prompt.trim(),
+                negative_prompt: negativePrompt.trim() || undefined,
+                image_url: mode === 'image' && image ? image : undefined,
+                parameters: {
                     duration: `${duration}s`,
-                    ratio: aspectRatio,
+                    aspect_ratio: aspectRatio,
                     cfg_scale: cfgScale,
-                    cost: costCredits,
-                    source_image: image ? 'mock_hash' : undefined 
+                },
+                idempotency_key: generateIdempotencyKey(),
+            });
+
+            setSuccess(true);
+            triggerNotification('success');
+
+            setTimeout(() => {
+                onOpenProfile();
+            }, 2000);
+
+        } catch (err: any) {
+            console.error('Generation failed:', err);
+            let errorMessage = 'Не удалось запустить генерацию. Попробуйте позже.';
+            
+            if (err.message) {
+                try {
+                    const errorData = JSON.parse(err.message);
+                    errorMessage = errorData.message || errorData.detail || errorMessage;
+                } catch {
+                    errorMessage = err.message;
                 }
-            };
-            window.Telegram.WebApp.sendData(JSON.stringify(payload));
-        }, 2000);
+            }
+            
+            setError(errorMessage);
+            triggerNotification('error');
+            
+            if (errorMessage.includes('кредит') || errorMessage.includes('баланс') || errorMessage.includes('INSUFFICIENT')) {
+                setTimeout(() => {
+                    onOpenProfile();
+                }, 3000);
+            }
+        } finally {
+            setIsSubmitting(false);
+        }
     };
 
     return (
@@ -301,6 +345,27 @@ export const CreateKlingTurboView: React.FC<CreateKlingTurboViewProps> = ({ user
                         </div>
                     </div>
                 </div>
+
+                {/* Error/Success Messages */}
+                {error && (
+                  <div className="bg-[#2A1515] border border-[#441111] rounded-xl p-4 flex items-start gap-3">
+                    <AlertCircle size={20} className="text-[#FF4D4D] shrink-0 mt-0.5" />
+                    <div className="flex-1">
+                      <p className="text-[#FF4D4D] text-sm font-bold mb-1">Ошибка</p>
+                      <p className="text-[#A0A0A0] text-xs">{error}</p>
+                    </div>
+                  </div>
+                )}
+
+                {success && (
+                  <div className="bg-[#1A4D3A] border border-[#2d7a5a] rounded-xl p-4 flex items-start gap-3">
+                    <CheckCircle size={20} className="text-[#22C55E] shrink-0 mt-0.5" />
+                    <div className="flex-1">
+                      <p className="text-[#22C55E] text-sm font-bold mb-1">Генерация запущена!</p>
+                      <p className="text-[#A0A0A0] text-xs">Результат придёт в Telegram</p>
+                    </div>
+                  </div>
+                )}
 
                 {/* Cost Preview */}
                 <div className="bg-[#15151A] border border-[#24242A] rounded-2xl p-4 space-y-3">

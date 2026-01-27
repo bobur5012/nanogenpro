@@ -1,8 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { Music, AlertCircle, Coins, Clock, Zap, Mic } from 'lucide-react';
+import { Music, AlertCircle, Coins, Clock, Zap, Mic, CheckCircle } from 'lucide-react';
 import { Button } from '../components/Button';
 import { ModelHeader } from '../components/ModelHeader';
-import { triggerHaptic, triggerSelection } from '../utils/haptics';
+import { triggerHaptic, triggerSelection, triggerNotification } from '../utils/haptics';
+import { generationAPI } from '../utils/api';
+import { getTelegramUserData, generateIdempotencyKey } from '../utils/generationHelpers';
 
 interface CreateKlingViewProps {
   userCredits: number;
@@ -20,6 +22,8 @@ export const CreateKlingView: React.FC<CreateKlingViewProps> = ({ userCredits, o
   const [duration, setDuration] = useState<5 | 10>(5);
   const [isAudioEnabled, setIsAudioEnabled] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState(false);
 
   useEffect(() => {
       console.log("MODEL_SELECTED: Kling 2.6 Pro");
@@ -49,27 +53,69 @@ export const CreateKlingView: React.FC<CreateKlingViewProps> = ({ userCredits, o
       setIsAudioEnabled(!isAudioEnabled);
   };
 
-  const handleSubmit = () => {
-    if (!canAfford || !isValid) return;
+  const handleSubmit = async () => {
+    if (!canAfford || !isValid || isSubmitting) return;
 
     setIsSubmitting(true);
+    setError(null);
+    setSuccess(false);
     triggerHaptic('medium');
     
-    setTimeout(() => {
-        const payload = {
-            type: 'video_gen',
-            payload: {
-                model: 'kling-2.6-pro',
-                prompt,
-                negative_prompt: negativePrompt,
-                duration: `${duration}s`,
-                audio: isAudioEnabled,
-                cost_credits: costCredits,
-                cost_uzs: costUZS
-            }
-        };
-        window.Telegram.WebApp.sendData(JSON.stringify(payload));
-    }, 1500);
+    try {
+      const userData = getTelegramUserData();
+      if (!userData) {
+        throw new Error('Telegram данные не найдены');
+      }
+
+      const result = await generationAPI.start({
+        user_id: userData.userId,
+        init_data: userData.initData,
+        model_id: 'kling-video/v2.0/master/text-to-video',
+        model_name: 'Kling 2.6 Pro',
+        generation_type: 'video',
+        prompt: prompt.trim(),
+        negative_prompt: negativePrompt.trim() || undefined,
+        parameters: {
+          duration: `${duration}s`,
+          audio: isAudioEnabled,
+        },
+        idempotency_key: generateIdempotencyKey(),
+      });
+
+      setSuccess(true);
+      triggerNotification('success');
+
+      // Вернуться в профиль через 2 секунды
+      setTimeout(() => {
+        onOpenProfile();
+      }, 2000);
+
+    } catch (err: any) {
+      console.error('Generation failed:', err);
+      let errorMessage = 'Не удалось запустить генерацию. Попробуйте позже.';
+      
+      // Парсим структурированную ошибку
+      if (err.message) {
+        try {
+          const errorData = JSON.parse(err.message);
+          errorMessage = errorData.message || errorData.detail || errorMessage;
+        } catch {
+          errorMessage = err.message;
+        }
+      }
+      
+      setError(errorMessage);
+      triggerNotification('error');
+      
+      // Если это ошибка недостатка кредитов, предложить пополнить
+      if (errorMessage.includes('кредит') || errorMessage.includes('баланс') || errorMessage.includes('INSUFFICIENT')) {
+        setTimeout(() => {
+          onOpenProfile();
+        }, 3000);
+      }
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const formatUZS = (amount: number) => amount.toLocaleString('ru-RU');
@@ -163,6 +209,27 @@ export const CreateKlingView: React.FC<CreateKlingViewProps> = ({ userCredits, o
                 />
             </div>
         </div>
+
+        {/* Error/Success Messages */}
+        {error && (
+          <div className="bg-[#2A1515] border border-[#441111] rounded-xl p-4 flex items-start gap-3">
+            <AlertCircle size={20} className="text-[#FF4D4D] shrink-0 mt-0.5" />
+            <div className="flex-1">
+              <p className="text-[#FF4D4D] text-sm font-bold mb-1">Ошибка</p>
+              <p className="text-[#A0A0A0] text-xs">{error}</p>
+            </div>
+          </div>
+        )}
+
+        {success && (
+          <div className="bg-[#1A4D3A] border border-[#2d7a5a] rounded-xl p-4 flex items-start gap-3">
+            <CheckCircle size={20} className="text-[#22C55E] shrink-0 mt-0.5" />
+            <div className="flex-1">
+              <p className="text-[#22C55E] text-sm font-bold mb-1">Генерация запущена!</p>
+              <p className="text-[#A0A0A0] text-xs">Результат придёт в Telegram</p>
+            </div>
+          </div>
+        )}
 
         {/* Cost Preview Section */}
         <div className="bg-[#15151A] border border-[#24242A] rounded-2xl p-4 space-y-3">

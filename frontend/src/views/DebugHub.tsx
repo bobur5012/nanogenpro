@@ -1,11 +1,31 @@
-import React from 'react';
-import { User, ArrowUpCircle, Code, ChevronRight, Clapperboard, Film, Layers, Sparkles, Zap, Video, Brain, LayoutTemplate, Image as ImageIcon } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { User, ArrowUpCircle, Code, ChevronRight, Clapperboard, Film, Layers, Sparkles, Zap, Video, Brain, LayoutTemplate, Image as ImageIcon, Shield } from 'lucide-react';
+import { adminAPI } from '../utils/api';
+import { getTelegramUserData } from '../utils/generationHelpers';
 
 interface DebugHubProps {
   onNavigate: (screen: string) => void;
 }
 
 export const DebugHub: React.FC<DebugHubProps> = ({ onNavigate }) => {
+  const [isAdmin, setIsAdmin] = useState(false);
+
+  useEffect(() => {
+    checkAdminStatus();
+  }, []);
+
+  const checkAdminStatus = async () => {
+    const userData = getTelegramUserData();
+    if (!userData) return;
+
+    try {
+      await adminAPI.getStats(userData.userId);
+      setIsAdmin(true);
+    } catch {
+      setIsAdmin(false);
+    }
+  };
+
   const screens = [
     { id: 'kling', label: 'Kling 2.6 Pro (Text)', icon: Clapperboard, desc: '/kling', color: 'text-rose-500' },
     { id: 'kling_img2vid', label: 'Kling 2.6 Pro (Image)', icon: Film, desc: '/kling-i2v', color: 'text-orange-400' },
@@ -22,6 +42,7 @@ export const DebugHub: React.FC<DebugHubProps> = ({ onNavigate }) => {
     { id: 'veo', label: 'Veo 3.1', icon: Film, desc: '/veo', color: 'text-cyan-400' },
     { id: 'upscale', label: 'Upscale (NanoScale)', icon: ArrowUpCircle, desc: '/upscale', color: 'text-emerald-400' },
     { id: 'profile', label: 'Профиль', icon: User, desc: '/profile', color: 'text-blue-400' },
+    ...(isAdmin ? [{ id: 'admin', label: 'Админ панель', icon: Shield, desc: '/admin', color: 'text-[#FFD400]' }] : []),
   ];
 
   return (

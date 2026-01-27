@@ -267,48 +267,24 @@ async def webapp_data_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
         logger.error("WebApp data handler error", error=str(e), user_id=user.id)
 
 
+# DEPRECATED: These handlers are no longer used as frontend calls /api/generation/start directly
+# Keeping for backward compatibility only
 async def handle_video_generation(user_id: int, payload: dict, context: ContextTypes.DEFAULT_TYPE):
-    """Handle video generation request from WebApp"""
-    try:
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                f"{API_BASE}/api/generation/video",
-                json={
-                    "user_id": user_id,
-                    **payload,
-                },
-                timeout=30.0,
-            )
-            response.raise_for_status()
-            
-    except Exception as e:
-        logger.error("Video generation failed", error=str(e), user_id=user_id)
-        await context.bot.send_message(
-            chat_id=user_id,
-            text="❌ Ошибка запуска генерации. Попробуйте позже.",
-        )
+    """DEPRECATED: Handle video generation request from WebApp (legacy)"""
+    logger.warning("Deprecated handle_video_generation called", user_id=user_id)
+    await context.bot.send_message(
+        chat_id=user_id,
+        text="⚠️ Пожалуйста, используйте новую версию приложения для генерации.",
+    )
 
 
 async def handle_image_generation(user_id: int, payload: dict, context: ContextTypes.DEFAULT_TYPE):
-    """Handle image generation request from WebApp"""
-    try:
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                f"{API_BASE}/api/generation/image",
-                json={
-                    "user_id": user_id,
-                    **payload,
-                },
-                timeout=30.0,
-            )
-            response.raise_for_status()
-            
-    except Exception as e:
-        logger.error("Image generation failed", error=str(e), user_id=user_id)
-        await context.bot.send_message(
-            chat_id=user_id,
-            text="❌ Ошибка запуска генерации. Попробуйте позже.",
-        )
+    """DEPRECATED: Handle image generation request from WebApp (legacy)"""
+    logger.warning("Deprecated handle_image_generation called", user_id=user_id)
+    await context.bot.send_message(
+        chat_id=user_id,
+        text="⚠️ Пожалуйста, используйте новую версию приложения для генерации.",
+    )
 
 
 async def handle_payment_confirm(user_id: int, payload: dict, context: ContextTypes.DEFAULT_TYPE):

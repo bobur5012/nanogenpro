@@ -218,6 +218,76 @@ async def get_admin_stats(
     )
 
 
+@router.get("/payments/pending")
+async def get_pending_payments(
+    admin_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    """Get list of pending payments"""
+    from sqlalchemy import select
+    from datetime import datetime
+    
+    # Verify admin
+    admin = await db.get(User, admin_id)
+    if not admin or not admin.is_admin:
+        raise HTTPException(status_code=403, detail="Not authorized")
+    
+    result = await db.execute(
+        select(Payment)
+        .where(Payment.status == PaymentStatus.PENDING)
+        .order_by(Payment.created_at.desc())
+        .limit(50)
+    )
+    payments = result.scalars().all()
+    
+    return [
+        {
+            "id": p.id,
+            "user_id": p.user_id,
+            "amount_uzs": p.amount_uzs,
+            "credits": p.credits,
+            "screenshot_url": p.screenshot_url,
+            "created_at": p.created_at.isoformat() if p.created_at else None,
+        }
+        for p in payments
+    ]
+
+
+@router.get("/withdrawals/pending")
+async def get_pending_withdrawals(
+    admin_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    """Get list of pending withdrawals"""
+    from sqlalchemy import select
+    
+    # Verify admin
+    admin = await db.get(User, admin_id)
+    if not admin or not admin.is_admin:
+        raise HTTPException(status_code=403, detail="Not authorized")
+    
+    result = await db.execute(
+        select(Withdrawal)
+        .where(Withdrawal.status.in_([WithdrawalStatus.PENDING, WithdrawalStatus.FROZEN]))
+        .order_by(Withdrawal.created_at.desc())
+        .limit(50)
+    )
+    withdrawals = result.scalars().all()
+    
+    return [
+        {
+            "id": w.id,
+            "user_id": w.user_id,
+            "amount_uzs": w.amount_uzs,
+            "card_number": w.card_number,
+            "card_type": w.card_type.value if w.card_type else None,
+            "status": w.status.value,
+            "created_at": w.created_at.isoformat() if w.created_at else None,
+        }
+        for w in withdrawals
+    ]
+
+
 # ========== USER MANAGEMENT ==========
 
 @router.post("/user/{user_id}/credits")
