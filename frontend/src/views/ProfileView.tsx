@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { TelegramUser } from '../types';
-import { Gem, Shield, Image as ImageIcon, Video, CreditCard, Users, MessageCircle, History, Clock, CheckCircle, XCircle, Loader2 } from 'lucide-react';
+import { Gem, Shield, Image as ImageIcon, Video, CreditCard, Users, MessageCircle, History as HistoryIcon, Clock, CheckCircle, XCircle, Loader2 } from 'lucide-react';
 import { triggerHaptic, triggerSelection } from '../utils/haptics';
 import { ModelHeader } from '../components/ModelHeader';
 import { userAPI, generationAPI } from '../utils/api';
@@ -21,6 +21,9 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ user, credits, onNavig
   const [selectedPreset, setSelectedPreset] = useState<number | null>(null);
   const [currentCredits, setCurrentCredits] = useState<number>(credits);
   const [isLoadingBalance, setIsLoadingBalance] = useState(false);
+  const [showHistory, setShowHistory] = useState(false);
+  const [history, setHistory] = useState<any[]>([]);
+  const [isLoadingHistory, setIsLoadingHistory] = useState(false);
 
   // Load balance from API when component mounts or user changes
   useEffect(() => {
@@ -199,7 +202,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ user, credits, onNavig
                 <div className={`w-10 h-10 rounded-full bg-[#1A1A1F] flex items-center justify-center transition-colors ${
                     showHistory ? 'text-[#FFD400]' : 'text-[#A0A0A0] group-hover:text-white'
                 }`}>
-                    <History size={20} />
+                    <HistoryIcon size={20} />
                 </div>
                 <span className="text-xs font-bold text-white">История</span>
             </button>
@@ -225,12 +228,12 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ user, credits, onNavig
                     </div>
                 ) : history.length === 0 ? (
                     <div className="bg-[#15151A] border border-[#24242A] rounded-xl p-8 text-center">
-                        <History className="w-12 h-12 text-[#505055] mx-auto mb-3 opacity-50" />
+                        <HistoryIcon className="w-12 h-12 text-[#505055] mx-auto mb-3 opacity-50" />
                         <p className="text-[#A0A0A0] text-sm">Нет генераций</p>
                     </div>
                 ) : (
                     <div className="space-y-2">
-                        {history.map((item) => (
+                        {history.map((item: any) => (
                             <div key={item.id} className="bg-[#15151A] border border-[#24242A] rounded-xl p-4">
                                 <div className="flex items-start justify-between mb-2">
                                     <div className="flex-1">
