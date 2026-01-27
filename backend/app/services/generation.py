@@ -64,9 +64,11 @@ GENERATION_TIMES = {
 }
 
 # Limits
-MAX_ACTIVE_GENERATIONS = 5      # Max concurrent generations per user
-RATE_LIMIT_PER_MINUTE = 10      # Max generations per minute
-GENERATION_TIMEOUT = 600        # Max 10 minutes
+MAX_ACTIVE_GENERATIONS = 5           # Max concurrent generations per user (non-premium)
+MAX_ACTIVE_GENERATIONS_PREMIUM = 10  # Max concurrent generations per user (premium)
+RATE_LIMIT_PER_MINUTE = 10           # Max generations per minute (non-premium)
+RATE_LIMIT_PREMIUM_PER_MINUTE = 30  # Max generations per minute (premium)
+GENERATION_TIMEOUT = 600             # Max 10 minutes
 
 
 class GenerationService:
@@ -221,6 +223,7 @@ class GenerationService:
             credits_charged=price,
             status=GenerationStatus.PENDING,
             idempotency_key=idempotency_key,
+            timeout_at=datetime.utcnow() + timedelta(seconds=GENERATION_TIMEOUT),
         )
         db.add(generation)
         
@@ -294,9 +297,26 @@ class GenerationService:
             )
             return
         
+        # Check timeout (if set)
+        if generation.timeout_at and generation.timeout_at < datetime.utcnow():
+            logger.warning(
+                "Generation timeout exceeded before processing",
+                generation_id=generation_id,
+                timeout_at=generation.timeout_at.isoformat(),
+            )
+            await self._handle_generation_failure(
+                db, generation, "Generation timeout exceeded"
+            )
+            return
+        
         # 2. UPDATE TO PROCESSING
         generation.status = GenerationStatus.PROCESSING
         generation.started_at = datetime.utcnow()
+        
+        # Set timeout_at if not already set
+        if not generation.timeout_at:
+            generation.timeout_at = datetime.utcnow() + timedelta(seconds=GENERATION_TIMEOUT)
+        
         await db.commit()
         
         logger.info("Generation processing started", generation_id=generation_id)
