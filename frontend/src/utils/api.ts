@@ -1,4 +1,6 @@
 // API Configuration
+import type { PartnerStats, CreditPackage, PaymentCard } from '../types';
+
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
 // Generic fetch wrapper with error handling
@@ -42,7 +44,8 @@ async function fetchAPI<T>(
 export const userAPI = {
   auth: () => fetchAPI<{ user: any; credits: number }>('/api/user/auth', { method: 'POST' }),
   getBalance: (userId: number) => fetchAPI<{ credits: number }>(`/api/user/balance/${userId}`),
-  getReferralStats: (userId: number) => fetchAPI<any>(`/api/user/referral/${userId}`),
+  getReferralStats: (userId: number) => fetchAPI<PartnerStats>(`/api/user/partner/${userId}`),
+  getPackages: () => fetchAPI<{ packages: CreditPackage[]; card: PaymentCard }>('/api/user/packages'),
 };
 
 // Generation API
@@ -105,14 +108,14 @@ export const generationAPI = {
 
 // Payment API
 export const paymentAPI = {
-  topup: (data: { amount: number; screenshot?: string }) => 
-    fetchAPI<{ transaction_id: number }>('/api/user/topup', {
+  topup: (data: { user_id: number; credits: number; amount_uzs: number; screenshot_base64?: string }) => 
+    fetchAPI<{ payment_id: number; status: string; message: string }>('/api/user/topup', {
       method: 'POST',
       body: JSON.stringify(data),
     }),
     
-  withdraw: (data: { amount: number; card: string }) =>
-    fetchAPI<{ success: boolean }>('/api/user/withdraw', {
+  withdraw: (data: { user_id: number; amount_uzs: number; card_number: string }) =>
+    fetchAPI<{ withdrawal_id: number; status: string; message: string }>('/api/user/withdraw', {
       method: 'POST',
       body: JSON.stringify(data),
     }),

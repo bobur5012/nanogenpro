@@ -178,7 +178,11 @@ const App: React.FC = () => {
   };
 
   const renderScreen = () => {
-      const commonProps = { userCredits: credits, onOpenProfile: handleOpenProfile };
+      const commonProps = { 
+        userCredits: credits, 
+        onOpenProfile: handleOpenProfile,
+        onCreditsUpdate: handleCreditsUpdate,
+      };
       
       switch (screen) {
           // Video Models
@@ -234,7 +238,8 @@ const App: React.FC = () => {
                         amount={paymentData?.amount || 0} 
                         price={paymentData?.price || 0} 
                         onBack={() => setScreen('profile')} 
-                        userCredits={credits} 
+                        userCredits={credits}
+                        onCreditsUpdate={handleCreditsUpdate}
                      />;
                      
           // Debug / Dev

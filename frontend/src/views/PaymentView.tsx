@@ -2,12 +2,14 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Copy, Upload, Check, AlertCircle, Loader2, CreditCard, ChevronRight } from 'lucide-react';
 import { ModelHeader } from '../components/ModelHeader';
 import { triggerHaptic, triggerNotification } from '../utils/haptics';
+import { userAPI, paymentAPI } from '../utils/api';
 
 interface PaymentViewProps {
     amount: number;       // Credits to buy
     price: number;        // Price in UZS
     onBack: () => void;
     userCredits: number;
+    onCreditsUpdate?: (newCredits: number) => void;
 }
 
 interface CreditPackage {
@@ -22,8 +24,6 @@ interface CardInfo {
     type: string;
 }
 
-const API_URL = import.meta.env.VITE_API_URL || '';
-
 // UZCARD Logo SVG
 const UzcardLogo = () => (
     <svg width="60" height="20" viewBox="0 0 120 40" fill="none">
@@ -32,7 +32,7 @@ const UzcardLogo = () => (
     </svg>
 );
 
-export const PaymentView: React.FC<PaymentViewProps> = ({ amount: initialAmount, price: initialPrice, onBack, userCredits }) => {
+export const PaymentView: React.FC<PaymentViewProps> = ({ amount: initialAmount, price: initialPrice, onBack, userCredits, onCreditsUpdate }) => {
     const [packages, setPackages] = useState<CreditPackage[]>([]);
     const [card, setCard] = useState<CardInfo | null>(null);
     const [selectedPackage, setSelectedPackage] = useState<CreditPackage | null>(null);
@@ -51,9 +51,7 @@ export const PaymentView: React.FC<PaymentViewProps> = ({ amount: initialAmount,
 
     const fetchPackages = async () => {
         try {
-            const response = await fetch(`${API_URL}/api/user/packages`);
-            if (!response.ok) throw new Error('Failed to fetch packages');
-            const data = await response.json();
+            const data = await userAPI.getPackages();
             setPackages(data.packages);
             setCard(data.card);
             
@@ -65,6 +63,7 @@ export const PaymentView: React.FC<PaymentViewProps> = ({ amount: initialAmount,
                 setSelectedPackage(data.packages[0]);
             }
         } catch (e) {
+            console.error('Failed to fetch packages:', e);
             // Fallback packages
             setPackages([
                 { credits: 100, price_uzs: 50000, discount: 0 },
@@ -123,27 +122,25 @@ export const PaymentView: React.FC<PaymentViewProps> = ({ amount: initialAmount,
         triggerHaptic('medium');
 
         try {
-            const response = await fetch(`${API_URL}/api/user/topup`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    user_id: userId,
-                    credits: selectedPackage.credits,
-                    amount_uzs: selectedPackage.price_uzs,
-                    screenshot_base64: screenshot,
-                }),
+            // Extract base64 data (remove data:image/...;base64, prefix if present)
+            const base64Data = screenshot.includes(',') ? screenshot.split(',')[1] : screenshot;
+            
+            const result = await paymentAPI.topup({
+                user_id: userId,
+                credits: selectedPackage.credits,
+                amount_uzs: selectedPackage.price_uzs,
+                screenshot_base64: base64Data,
             });
-
-            if (!response.ok) {
-                const error = await response.json();
-                throw new Error(error.detail || 'Ошибка отправки');
-            }
 
             setSubmitSuccess(true);
             triggerNotification('success');
+            
+            // Note: Balance will be updated after admin approval, not immediately
+            // But we can still call the callback if needed for UI consistency
 
         } catch (e: any) {
             triggerNotification('error');
+            console.error('Topup failed:', e);
         } finally {
             setIsSubmitting(false);
         }

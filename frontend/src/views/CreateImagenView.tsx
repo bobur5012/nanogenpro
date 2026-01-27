@@ -2,15 +2,18 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { 
     Image as ImageIcon, Zap, Star, LayoutTemplate, 
     Monitor, Smartphone, Square, Coins, AlertCircle, 
-    Info, Palette, Type, Check, Upload, Trash2
+    Info, Palette, Type, Check, Upload, Trash2, CheckCircle
 } from 'lucide-react';
 import { Button } from '../components/Button';
 import { BalanceDisplay } from '../components/BalanceDisplay';
 import { triggerHaptic, triggerSelection, triggerNotification } from '../utils/haptics';
+import { generationAPI } from '../utils/api';
+import { getTelegramUserData, generateIdempotencyKey } from '../utils/generationHelpers';
 
 interface CreateImagenViewProps {
   userCredits: number;
   onOpenProfile: () => void;
+  onCreditsUpdate?: (newCredits: number) => void;
 }
 
 type ImagenMode = 'fast' | 'generate' | 'ultra';
@@ -39,7 +42,7 @@ const STYLES = [
 
 const CREDITS_PER_DOLLAR = 100;
 
-export const CreateImagenView: React.FC<CreateImagenViewProps> = ({ userCredits, onOpenProfile }) => {
+export const CreateImagenView: React.FC<CreateImagenViewProps> = ({ userCredits, onOpenProfile, onCreditsUpdate }) => {
     // State
     const [mode, setMode] = useState<ImagenMode>('generate');
     const [prompt, setPrompt] = useState('');
@@ -52,6 +55,8 @@ export const CreateImagenView: React.FC<CreateImagenViewProps> = ({ userCredits,
     const refInputRef = useRef<HTMLInputElement>(null);
     
     const [isSubmitting, setIsSubmitting] = useState(false);
+    const [error, setError] = useState<string | null>(null);
+    const [success, setSuccess] = useState(false);
 
     const currentMode = MODES.find(m => m.id === mode) || MODES[1];
 
@@ -113,32 +118,75 @@ export const CreateImagenView: React.FC<CreateImagenViewProps> = ({ userCredits,
     const canAfford = userCredits >= costCredits;
     const isValid = prompt.trim().length > 0;
 
-    const handleSubmit = () => {
-        if (!canAfford || !isValid) {
+    const handleSubmit = async () => {
+        if (!canAfford || !isValid || isSubmitting) {
             triggerNotification('error');
             return;
         }
         setIsSubmitting(true);
+        setError(null);
+        setSuccess(false);
         triggerHaptic('medium');
 
-        setTimeout(() => {
-            const payload = {
-                type: 'image_gen',
-                payload: {
-                    model: `imagen-4.0-${mode}`,
-                    prompt,
-                    settings: {
-                        ratio: aspectRatio,
-                        format,
-                        style,
-                        resolution: '2048x2048', // Default max based on specs
-                        reference_images: refImages.length > 0 ? 'base64_array_truncated' : undefined
-                    },
-                    cost: costCredits
+        try {
+            const userData = getTelegramUserData();
+            if (!userData) {
+                throw new Error('Telegram данные не найдены');
+            }
+
+            // Use first reference image if available
+            let imageUrl: string | undefined;
+            if (refImages.length > 0) {
+                imageUrl = refImages[0];
+            }
+
+            const result = await generationAPI.start({
+                user_id: userData.userId,
+                init_data: userData.initData,
+                model_id: 'imagen/4.0',
+                model_name: 'Imagen 4.0',
+                generation_type: 'image',
+                prompt: prompt.trim(),
+                image_url: imageUrl,
+                parameters: {
+                    mode: mode,
+                    aspect_ratio: aspectRatio,
+                    format,
+                    style,
+                    resolution: '2048x2048',
+                },
+                idempotency_key: generateIdempotencyKey(),
+            });
+
+            setSuccess(true);
+            triggerNotification('success');
+
+            if (result.new_balance !== undefined && onCreditsUpdate) {
+                onCreditsUpdate(result.new_balance);
+            }
+
+            setTimeout(() => {
+                onOpenProfile();
+            }, 2000);
+
+        } catch (err: any) {
+            console.error('Generation failed:', err);
+            let errorMessage = 'Не удалось запустить генерацию. Попробуйте позже.';
+            
+            if (err.message) {
+                try {
+                    const errorData = JSON.parse(err.message);
+                    errorMessage = errorData.message || errorData.detail || errorMessage;
+                } catch {
+                    errorMessage = err.message || errorMessage;
                 }
-            };
-            window.Telegram.WebApp.sendData(JSON.stringify(payload));
-        }, 2000);
+            }
+            
+            setError(errorMessage);
+            triggerNotification('error');
+        } finally {
+            setIsSubmitting(false);
+        }
     };
 
     return (

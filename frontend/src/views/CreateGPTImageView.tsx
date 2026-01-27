@@ -2,15 +2,18 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { 
     Image as ImageIcon, PenTool, Brain, Upload, Trash2, 
     Settings, AlertCircle, Coins, Check, Zap, Layers,
-    Maximize, Minimize, Sliders, Info
+    Maximize, Minimize, Sliders, Info, CheckCircle
 } from 'lucide-react';
 import { Button } from '../components/Button';
 import { BalanceDisplay } from '../components/BalanceDisplay';
 import { triggerHaptic, triggerSelection, triggerNotification } from '../utils/haptics';
+import { generationAPI } from '../utils/api';
+import { getTelegramUserData, generateIdempotencyKey } from '../utils/generationHelpers';
 
 interface CreateGPTImageViewProps {
   userCredits: number;
   onOpenProfile: () => void;
+  onCreditsUpdate?: (newCredits: number) => void;
 }
 
 type GPTMode = 'text' | 'edit';
@@ -55,6 +58,8 @@ export const CreateGPTImageView: React.FC<CreateGPTImageViewProps> = ({ userCred
     const [composition, setComposition] = useState(true);
 
     const [isSubmitting, setIsSubmitting] = useState(false);
+    const [error, setError] = useState<string | null>(null);
+    const [success, setSuccess] = useState(false);
     const fileInputRef = useRef<HTMLInputElement>(null);
 
     // Logging
@@ -117,36 +122,78 @@ export const CreateGPTImageView: React.FC<CreateGPTImageViewProps> = ({ userCred
         return true;
     }, [mode, prompt, image]);
 
-    const handleSubmit = () => {
-        if (!canAfford || !isValid) {
+    const handleSubmit = async () => {
+        if (!canAfford || !isValid || isSubmitting) {
             triggerNotification('error');
             return;
         }
         setIsSubmitting(true);
+        setError(null);
+        setSuccess(false);
         triggerHaptic('medium');
 
-        setTimeout(() => {
-            const payload = {
-                type: 'image_gen', // Using generic image payload or can be custom 'gpt_gen'
-                payload: {
-                    model: `gpt-image-1.5-${mode}`,
-                    prompt,
-                    image_data: image ? 'base64_truncated' : undefined,
-                    settings: {
-                        size,
-                        quality,
-                        format,
-                        transparency,
-                        compression,
-                        partial_images: partialImages,
-                        streaming,
-                        composition
-                    },
-                    cost: costCredits
+        try {
+            const userData = getTelegramUserData();
+            if (!userData) {
+                throw new Error('Telegram данные не найдены');
+            }
+
+            let imageUrl: string | undefined;
+            if (image && mode === 'edit') {
+                imageUrl = image;
+            }
+
+            const result = await generationAPI.start({
+                user_id: userData.userId,
+                init_data: userData.initData,
+                model_id: 'gpt-image/1.5',
+                model_name: 'GPT Image 1.5',
+                generation_type: 'image',
+                prompt: prompt.trim(),
+                image_url: imageUrl,
+                parameters: {
+                    mode: mode,
+                    size,
+                    quality,
+                    format,
+                    transparency,
+                    compression,
+                    partial_images: partialImages,
+                    streaming,
+                    composition,
+                },
+                idempotency_key: generateIdempotencyKey(),
+            });
+
+            setSuccess(true);
+            triggerNotification('success');
+
+            if (result.new_balance !== undefined && onCreditsUpdate) {
+                onCreditsUpdate(result.new_balance);
+            }
+
+            setTimeout(() => {
+                onOpenProfile();
+            }, 2000);
+
+        } catch (err: any) {
+            console.error('Generation failed:', err);
+            let errorMessage = 'Не удалось запустить генерацию. Попробуйте позже.';
+            
+            if (err.message) {
+                try {
+                    const errorData = JSON.parse(err.message);
+                    errorMessage = errorData.message || errorData.detail || errorMessage;
+                } catch {
+                    errorMessage = err.message || errorMessage;
                 }
-            };
-            window.Telegram.WebApp.sendData(JSON.stringify(payload));
-        }, 2000);
+            }
+            
+            setError(errorMessage);
+            triggerNotification('error');
+        } finally {
+            setIsSubmitting(false);
+        }
     };
 
     return (

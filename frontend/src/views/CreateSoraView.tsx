@@ -1,12 +1,15 @@
 import React, { useState, useEffect } from 'react';
-import { Video, Coins, AlertTriangle, Monitor, Smartphone, Sparkles, Film } from 'lucide-react';
+import { Video, Coins, AlertTriangle, Monitor, Smartphone, Sparkles, Film, CheckCircle } from 'lucide-react';
 import { Button } from '../components/Button';
 import { triggerHaptic, triggerSelection, triggerNotification } from '../utils/haptics';
 import { BalanceDisplay } from '../components/BalanceDisplay';
+import { generationAPI } from '../utils/api';
+import { getTelegramUserData, generateIdempotencyKey } from '../utils/generationHelpers';
 
 interface CreateSoraViewProps {
   userCredits: number;
   onOpenProfile: () => void;
+  onCreditsUpdate?: (newCredits: number) => void;
 }
 
 const PRICE_PER_SEC = 0.315;
@@ -17,12 +20,14 @@ const RATIOS = [
   { id: '9:16', label: '9:16', icon: Smartphone },
 ];
 
-export const CreateSoraView: React.FC<CreateSoraViewProps> = ({ userCredits, onOpenProfile }) => {
+export const CreateSoraView: React.FC<CreateSoraViewProps> = ({ userCredits, onOpenProfile, onCreditsUpdate }) => {
   const [prompt, setPrompt] = useState('');
   const [duration, setDuration] = useState<5 | 10>(5);
   const [resolution, setResolution] = useState<'720p' | '1080p'>('720p');
   const [aspectRatio, setAspectRatio] = useState('16:9');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState(false);
 
   useEffect(() => {
       console.log("MODEL_SELECTED: Sora 2 Pro");
@@ -48,29 +53,70 @@ export const CreateSoraView: React.FC<CreateSoraViewProps> = ({ userCredits, onO
       }
   };
 
-  const handleSubmit = () => {
-    if (!canAfford || !isValid) {
+  const handleSubmit = async () => {
+    if (!canAfford || !isValid || isSubmitting) {
         triggerNotification('error');
         return;
     }
 
     setIsSubmitting(true);
+    setError(null);
+    setSuccess(false);
     triggerHaptic('medium');
-    
-    setTimeout(() => {
-        const payload = {
-            type: 'video_gen',
-            payload: {
-                model: 'sora-2-pro',
-                prompt,
+
+    try {
+        const userData = getTelegramUserData();
+        if (!userData) {
+            throw new Error('Telegram данные не найдены');
+        }
+
+        const result = await generationAPI.start({
+            user_id: userData.userId,
+            init_data: userData.initData,
+            model_id: 'sora/2-pro',
+            model_name: 'Sora 2 Pro',
+            generation_type: 'video',
+            prompt: prompt.trim(),
+            parameters: {
                 duration: `${duration}s`,
                 resolution,
-                ratio: aspectRatio,
-                cost: costCredits
+                aspect_ratio: aspectRatio,
+            },
+            idempotency_key: generateIdempotencyKey(),
+        });
+
+        setSuccess(true);
+        triggerNotification('success');
+
+        // Update balance if provided
+        if (result.new_balance !== undefined && onCreditsUpdate) {
+            onCreditsUpdate(result.new_balance);
+        }
+
+        // Return to profile after 2 seconds
+        setTimeout(() => {
+            onOpenProfile();
+        }, 2000);
+
+    } catch (err: any) {
+        console.error('Generation failed:', err);
+        let errorMessage = 'Не удалось запустить генерацию. Попробуйте позже.';
+        
+        // Parse structured error if available
+        if (err.message) {
+            try {
+                const errorData = JSON.parse(err.message);
+                errorMessage = errorData.message || errorData.detail || errorMessage;
+            } catch {
+                errorMessage = err.message || errorMessage;
             }
-        };
-        window.Telegram.WebApp.sendData(JSON.stringify(payload));
-    }, 2000);
+        }
+        
+        setError(errorMessage);
+        triggerNotification('error');
+    } finally {
+        setIsSubmitting(false);
+    }
   };
 
   return (

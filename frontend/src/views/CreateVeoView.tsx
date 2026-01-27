@@ -13,15 +13,19 @@ import {
     Type,
     Film,
     Upload,
-    Trash2
+    Trash2,
+    CheckCircle
 } from 'lucide-react';
 import { Button } from '../components/Button';
 import { BalanceDisplay } from '../components/BalanceDisplay';
 import { triggerHaptic, triggerSelection, triggerNotification } from '../utils/haptics';
+import { generationAPI } from '../utils/api';
+import { getTelegramUserData, generateIdempotencyKey } from '../utils/generationHelpers';
 
 interface CreateVeoViewProps {
   userCredits: number;
   onOpenProfile: () => void;
+  onCreditsUpdate?: (newCredits: number) => void;
 }
 
 type VeoMode = 'text' | 'image' | 'reference' | 'frames';
@@ -50,7 +54,7 @@ const RATIOS = [
   { id: '9:16', label: '9:16', icon: Smartphone },
 ];
 
-export const CreateVeoView: React.FC<CreateVeoViewProps> = ({ userCredits, onOpenProfile }) => {
+export const CreateVeoView: React.FC<CreateVeoViewProps> = ({ userCredits, onOpenProfile, onCreditsUpdate }) => {
     const [mode, setMode] = useState<VeoMode>('text');
     const [prompt, setPrompt] = useState('');
     const [image, setImage] = useState<string | null>(null);
@@ -58,6 +62,8 @@ export const CreateVeoView: React.FC<CreateVeoViewProps> = ({ userCredits, onOpe
     const [aspectRatio, setAspectRatio] = useState('16:9');
     const [audio, setAudio] = useState(false);
     const [isSubmitting, setIsSubmitting] = useState(false);
+    const [error, setError] = useState<string | null>(null);
+    const [success, setSuccess] = useState(false);
     
     const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -113,30 +119,74 @@ export const CreateVeoView: React.FC<CreateVeoViewProps> = ({ userCredits, onOpe
         setImage(null);
     };
 
-    const handleSubmit = () => {
-        if (!canAfford || !isValid) {
+    const handleSubmit = async () => {
+        if (!canAfford || !isValid || isSubmitting) {
             triggerNotification('error');
             return;
         }
 
         setIsSubmitting(true);
+        setError(null);
+        setSuccess(false);
         triggerHaptic('medium');
-        
-        setTimeout(() => {
-            const payload = {
-                type: 'video_gen',
-                payload: {
-                    model: `veo-3.1-${mode}`,
-                    prompt,
-                    image_data: image ? 'base64_truncated' : undefined,
+
+        try {
+            const userData = getTelegramUserData();
+            if (!userData) {
+                throw new Error('Telegram данные не найдены');
+            }
+
+            let imageUrl: string | undefined;
+            if (image && (mode === 'image' || mode === 'reference' || mode === 'frames')) {
+                imageUrl = image;
+            }
+
+            const result = await generationAPI.start({
+                user_id: userData.userId,
+                init_data: userData.initData,
+                model_id: 'veo/3.1',
+                model_name: 'Veo 3.1',
+                generation_type: 'video',
+                prompt: prompt.trim(),
+                image_url: imageUrl,
+                parameters: {
+                    mode: mode,
                     duration: `${duration}s`,
-                    ratio: aspectRatio,
-                    audio,
-                    cost: costCredits
+                    aspect_ratio: aspectRatio,
+                    audio: audio,
+                },
+                idempotency_key: generateIdempotencyKey(),
+            });
+
+            setSuccess(true);
+            triggerNotification('success');
+
+            if (result.new_balance !== undefined && onCreditsUpdate) {
+                onCreditsUpdate(result.new_balance);
+            }
+
+            setTimeout(() => {
+                onOpenProfile();
+            }, 2000);
+
+        } catch (err: any) {
+            console.error('Generation failed:', err);
+            let errorMessage = 'Не удалось запустить генерацию. Попробуйте позже.';
+            
+            if (err.message) {
+                try {
+                    const errorData = JSON.parse(err.message);
+                    errorMessage = errorData.message || errorData.detail || errorMessage;
+                } catch {
+                    errorMessage = err.message || errorMessage;
                 }
-            };
-            window.Telegram.WebApp.sendData(JSON.stringify(payload));
-        }, 2000);
+            }
+            
+            setError(errorMessage);
+            triggerNotification('error');
+        } finally {
+            setIsSubmitting(false);
+        }
     };
 
     return (

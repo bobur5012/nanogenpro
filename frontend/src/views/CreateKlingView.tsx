@@ -9,6 +9,7 @@ import { getTelegramUserData, generateIdempotencyKey } from '../utils/generation
 interface CreateKlingViewProps {
   userCredits: number;
   onOpenProfile: () => void;
+  onCreditsUpdate?: (newCredits: number) => void;
 }
 
 // Pricing in UZS (3x markup applied)
@@ -16,7 +17,7 @@ const PRICE_PER_SEC_NO_AUDIO = 22050;  // ~$0.0735 * 3 * 100 credits
 const PRICE_PER_SEC_AUDIO = 44100;     // ~$0.147 * 3 * 100 credits
 const CREDITS_PER_UZS = 1000;          // 1000 UZS = 1 credit
 
-export const CreateKlingView: React.FC<CreateKlingViewProps> = ({ userCredits, onOpenProfile }) => {
+export const CreateKlingView: React.FC<CreateKlingViewProps> = ({ userCredits, onOpenProfile, onCreditsUpdate }) => {
   const [prompt, setPrompt] = useState('');
   const [negativePrompt, setNegativePrompt] = useState('');
   const [duration, setDuration] = useState<5 | 10>(5);
@@ -84,6 +85,11 @@ export const CreateKlingView: React.FC<CreateKlingViewProps> = ({ userCredits, o
 
       setSuccess(true);
       triggerNotification('success');
+
+      // Update balance if provided
+      if (result.new_balance !== undefined && onCreditsUpdate) {
+        onCreditsUpdate(result.new_balance);
+      }
 
       // Вернуться в профиль через 2 секунды
       setTimeout(() => {

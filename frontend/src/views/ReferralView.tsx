@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Home, BarChart2, CreditCard, Copy, Users, Wallet, Share2, ShieldCheck, CheckCircle, AlertCircle, Loader2 } from 'lucide-react';
 import { ModelHeader } from '../components/ModelHeader';
 import { triggerHaptic, triggerSelection, triggerNotification } from '../utils/haptics';
+import { userAPI, paymentAPI } from '../utils/api';
 
 interface ReferralViewProps {
     onBack: () => void;
@@ -23,8 +24,6 @@ interface PartnerStats {
 }
 
 type Tab = 'main' | 'stats' | 'withdraw';
-
-const API_URL = import.meta.env.VITE_API_URL || '';
 
 export const ReferralView: React.FC<ReferralViewProps> = ({ onBack, userCredits }) => {
     const [activeTab, setActiveTab] = useState<Tab>('main');
@@ -52,18 +51,8 @@ export const ReferralView: React.FC<ReferralViewProps> = ({ onBack, userCredits 
         }
 
         try {
-            const url = `${API_URL}/api/user/partner/${userId}`;
-            console.log('Fetching partner stats from:', url);
-            
-            const response = await fetch(url);
-            
-            if (!response.ok) {
-                const errorData = await response.json().catch(() => ({}));
-                console.error('Partner stats API error:', response.status, errorData);
-                throw new Error(errorData.detail || `HTTP ${response.status}: Failed to fetch stats`);
-            }
-            
-            const data = await response.json();
+            console.log('Fetching partner stats for user:', userId);
+            const data = await userAPI.getReferralStats(userId);
             console.log('Partner stats received:', data);
             
             setStats(data);
@@ -73,7 +62,19 @@ export const ReferralView: React.FC<ReferralViewProps> = ({ onBack, userCredits 
             setError(null);
         } catch (e: any) {
             console.error('Failed to fetch partner stats:', e);
-            setError(e.message || 'Ошибка загрузки данных');
+            // Parse structured error if available
+            let errorMessage = 'Ошибка загрузки данных';
+            if (e.message) {
+                try {
+                    const errorData = JSON.parse(e.message);
+                    if (errorData.message) {
+                        errorMessage = errorData.message;
+                    }
+                } catch {
+                    errorMessage = e.message || errorMessage;
+                }
+            }
+            setError(errorMessage);
         } finally {
             setLoading(false);
         }
@@ -143,22 +144,14 @@ export const ReferralView: React.FC<ReferralViewProps> = ({ onBack, userCredits 
 
         triggerHaptic('heavy');
         setIsWithdrawing(true);
+        setError(null);
 
         try {
-            const response = await fetch(`${API_URL}/api/user/withdraw`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    user_id: userId,
-                    amount_uzs: amount,
-                    card_number: cardNumber.replace(/\s/g, ''),
-                }),
+            const result = await paymentAPI.withdraw({
+                user_id: userId,
+                amount_uzs: amount,
+                card_number: cardNumber.replace(/\s/g, ''),
             });
-
-            if (!response.ok) {
-                const error = await response.json();
-                throw new Error(error.detail || 'Ошибка вывода');
-            }
 
             setWithdrawSuccess(true);
             triggerNotification('success');
@@ -169,7 +162,19 @@ export const ReferralView: React.FC<ReferralViewProps> = ({ onBack, userCredits 
 
         } catch (e: any) {
             triggerNotification('error');
-            setError(e.message);
+            // Parse structured error if available
+            let errorMessage = 'Ошибка вывода средств';
+            if (e.message) {
+                try {
+                    const errorData = JSON.parse(e.message);
+                    if (errorData.message) {
+                        errorMessage = errorData.message;
+                    }
+                } catch {
+                    errorMessage = e.message || errorMessage;
+                }
+            }
+            setError(errorMessage);
         } finally {
             setIsWithdrawing(false);
         }

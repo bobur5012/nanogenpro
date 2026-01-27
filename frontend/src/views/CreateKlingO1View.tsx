@@ -24,6 +24,7 @@ import { getTelegramUserData, generateIdempotencyKey } from '../utils/generation
 interface CreateKlingO1ViewProps {
   userCredits: number;
   onOpenProfile: () => void;
+  onCreditsUpdate?: (newCredits: number) => void;
 }
 
 type ModeType = 'img2vid' | 'vid2edit' | 'ref2vid' | 'vidref';
@@ -51,7 +52,7 @@ const RATIOS = [
   { id: '1:1', label: '1:1', icon: Square },
 ];
 
-export const CreateKlingO1View: React.FC<CreateKlingO1ViewProps> = ({ userCredits, onOpenProfile }) => {
+export const CreateKlingO1View: React.FC<CreateKlingO1ViewProps> = ({ userCredits, onOpenProfile, onCreditsUpdate }) => {
   const [mode, setMode] = useState<ModeType>('img2vid');
   const [prompt, setPrompt] = useState('');
   const [duration, setDuration] = useState<5 | 10>(5);
@@ -188,6 +189,11 @@ export const CreateKlingO1View: React.FC<CreateKlingO1ViewProps> = ({ userCredit
 
           setSuccess(true);
           triggerNotification('success');
+
+          // Update balance if provided
+          if (result.new_balance !== undefined && onCreditsUpdate) {
+              onCreditsUpdate(result.new_balance);
+          }
 
           setTimeout(() => {
               onOpenProfile();

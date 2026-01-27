@@ -2,15 +2,18 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { 
     Video, Image as ImageIcon, Zap, Monitor, Smartphone, Square, 
     Upload, Trash2, Sliders, AlertCircle, Coins, Clock, Film, 
-    Type, Lock, Info
+    Type, Lock, Info, CheckCircle
 } from 'lucide-react';
 import { Button } from '../components/Button';
 import { BalanceDisplay } from '../components/BalanceDisplay';
 import { triggerHaptic, triggerSelection, triggerNotification } from '../utils/haptics';
+import { generationAPI } from '../utils/api';
+import { getTelegramUserData, generateIdempotencyKey } from '../utils/generationHelpers';
 
 interface CreateRunwayViewProps {
   userCredits: number;
   onOpenProfile: () => void;
+  onCreditsUpdate?: (newCredits: number) => void;
 }
 
 type RunwayMode = 'text' | 'image';
@@ -33,7 +36,7 @@ const RATIOS = [
 const PRICE_PER_SEC = 0.05;
 const CREDITS_PER_DOLLAR = 100;
 
-export const CreateRunwayView: React.FC<CreateRunwayViewProps> = ({ userCredits, onOpenProfile }) => {
+export const CreateRunwayView: React.FC<CreateRunwayViewProps> = ({ userCredits, onOpenProfile, onCreditsUpdate }) => {
     // State
     const [mode, setMode] = useState<RunwayMode>('text');
     const [prompt, setPrompt] = useState('');
@@ -46,6 +49,8 @@ export const CreateRunwayView: React.FC<CreateRunwayViewProps> = ({ userCredits,
     const [watermark, setWatermark] = useState(true);
 
     const [isSubmitting, setIsSubmitting] = useState(false);
+    const [error, setError] = useState<string | null>(null);
+    const [success, setSuccess] = useState(false);
     const fileInputRef = useRef<HTMLInputElement>(null);
 
     // Logging
@@ -103,29 +108,81 @@ export const CreateRunwayView: React.FC<CreateRunwayViewProps> = ({ userCredits,
         return prompt.trim().length > 0;
     }, [mode, prompt, image]);
 
-    const handleSubmit = () => {
-        if (!canAfford || !isValid) {
+    const handleSubmit = async () => {
+        if (!canAfford || !isValid || isSubmitting) {
             triggerNotification('error');
             return;
         }
+
         setIsSubmitting(true);
+        setError(null);
+        setSuccess(false);
         triggerHaptic('medium');
 
-        setTimeout(() => {
-            const payload = {
-                type: 'video_gen',
-                payload: {
-                    model: `runway-gen4-turbo-${mode}`,
-                    prompt,
-                    image_data: image ? 'base64_truncated' : undefined,
+        try {
+            const userData = getTelegramUserData();
+            if (!userData) {
+                throw new Error('Telegram данные не найдены');
+            }
+
+            // Convert image to URL if present
+            let imageUrl: string | undefined;
+            if (image && mode === 'image') {
+                // For now, use the base64 data URL directly
+                // In production, you might want to upload to a CDN first
+                imageUrl = image;
+            }
+
+            const result = await generationAPI.start({
+                user_id: userData.userId,
+                init_data: userData.initData,
+                model_id: 'runway/gen4-turbo',
+                model_name: 'Runway Gen-4 Turbo',
+                generation_type: 'video',
+                prompt: prompt.trim(),
+                image_url: imageUrl,
+                parameters: {
+                    mode: mode,
                     duration: `${duration}s`,
-                    ratio: aspectRatio,
-                    cost: costCredits,
-                    advanced: { seed, watermark }
+                    aspect_ratio: aspectRatio,
+                    seed: seed || undefined,
+                    watermark: watermark,
+                },
+                idempotency_key: generateIdempotencyKey(),
+            });
+
+            setSuccess(true);
+            triggerNotification('success');
+
+            // Update balance if provided
+            if (result.new_balance !== undefined && onCreditsUpdate) {
+                onCreditsUpdate(result.new_balance);
+            }
+
+            // Return to profile after 2 seconds
+            setTimeout(() => {
+                onOpenProfile();
+            }, 2000);
+
+        } catch (err: any) {
+            console.error('Generation failed:', err);
+            let errorMessage = 'Не удалось запустить генерацию. Попробуйте позже.';
+            
+            // Parse structured error if available
+            if (err.message) {
+                try {
+                    const errorData = JSON.parse(err.message);
+                    errorMessage = errorData.message || errorData.detail || errorMessage;
+                } catch {
+                    errorMessage = err.message || errorMessage;
                 }
-            };
-            window.Telegram.WebApp.sendData(JSON.stringify(payload));
-        }, 2000);
+            }
+            
+            setError(errorMessage);
+            triggerNotification('error');
+        } finally {
+            setIsSubmitting(false);
+        }
     };
 
     return (

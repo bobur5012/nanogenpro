@@ -9,6 +9,7 @@ import { getTelegramUserData, generateIdempotencyKey } from '../utils/generation
 interface CreateKlingImg2VideoViewProps {
   userCredits: number;
   onOpenProfile: () => void;
+  onCreditsUpdate?: (newCredits: number) => void;
 }
 
 const PRICE_PER_SEC_NO_AUDIO = 0.0735;
@@ -21,7 +22,7 @@ const RATIOS = [
   { id: '1:1', label: '1:1', icon: Square },
 ];
 
-export const CreateKlingImg2VideoView: React.FC<CreateKlingImg2VideoViewProps> = ({ userCredits, onOpenProfile }) => {
+export const CreateKlingImg2VideoView: React.FC<CreateKlingImg2VideoViewProps> = ({ userCredits, onOpenProfile, onCreditsUpdate }) => {
   const [image, setImage] = useState<string | null>(null);
   const [prompt, setPrompt] = useState('');
   const [negativePrompt, setNegativePrompt] = useState('');
@@ -127,6 +128,11 @@ export const CreateKlingImg2VideoView: React.FC<CreateKlingImg2VideoViewProps> =
 
       setSuccess(true);
       triggerNotification('success');
+
+      // Update balance if provided
+      if (result.new_balance !== undefined && onCreditsUpdate) {
+        onCreditsUpdate(result.new_balance);
+      }
 
       setTimeout(() => {
         onOpenProfile();

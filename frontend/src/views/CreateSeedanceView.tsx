@@ -2,15 +2,18 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { 
     Video, Image as ImageIcon, Zap, Monitor, Smartphone, Square, 
     Upload, Trash2, Sliders, AlertCircle, Coins, Clock, Film, 
-    Type, Camera, Eye, Lock, RefreshCw, Wand2 
+    Type, Camera, Eye, Lock, RefreshCw, Wand2, CheckCircle
 } from 'lucide-react';
 import { Button } from '../components/Button';
 import { BalanceDisplay } from '../components/BalanceDisplay';
 import { triggerHaptic, triggerSelection, triggerNotification } from '../utils/haptics';
+import { generationAPI } from '../utils/api';
+import { getTelegramUserData, generateIdempotencyKey } from '../utils/generationHelpers';
 
 interface CreateSeedanceViewProps {
   userCredits: number;
   onOpenProfile: () => void;
+  onCreditsUpdate?: (newCredits: number) => void;
 }
 
 type SeedanceMode = 'pro_text' | 'lite_text' | 'lite_image';
@@ -45,7 +48,7 @@ const COST_LITE_480P = 0.019162;
 const COST_LITE_720P = 0.04725;
 const COST_PRO_ESTIMATE = 0.08; // Estimated base for tokens
 
-export const CreateSeedanceView: React.FC<CreateSeedanceViewProps> = ({ userCredits, onOpenProfile }) => {
+export const CreateSeedanceView: React.FC<CreateSeedanceViewProps> = ({ userCredits, onOpenProfile, onCreditsUpdate }) => {
     // State
     const [mode, setMode] = useState<SeedanceMode>('pro_text');
     const [prompt, setPrompt] = useState('');
@@ -61,6 +64,8 @@ export const CreateSeedanceView: React.FC<CreateSeedanceViewProps> = ({ userCred
     const [watermark, setWatermark] = useState(true);
 
     const [isSubmitting, setIsSubmitting] = useState(false);
+    const [error, setError] = useState<string | null>(null);
+    const [success, setSuccess] = useState(false);
     const fileInputRef = useRef<HTMLInputElement>(null);
 
     // Logging
@@ -143,31 +148,75 @@ export const CreateSeedanceView: React.FC<CreateSeedanceViewProps> = ({ userCred
         return prompt.trim().length > 0;
     }, [mode, prompt, image]);
 
-    const handleSubmit = () => {
-        if (!canAfford || !isValid) {
+    const handleSubmit = async () => {
+        if (!canAfford || !isValid || isSubmitting) {
             triggerNotification('error');
             return;
         }
         setIsSubmitting(true);
+        setError(null);
+        setSuccess(false);
         triggerHaptic('medium');
 
-        setTimeout(() => {
-            const payload = {
-                type: 'video_gen',
-                payload: {
-                    model: `seedance-1.0-${mode}`,
-                    prompt,
-                    image_data: image ? 'base64_truncated' : undefined,
+        try {
+            const userData = getTelegramUserData();
+            if (!userData) {
+                throw new Error('Telegram данные не найдены');
+            }
+
+            let imageUrl: string | undefined;
+            if (image && mode === 'lite_image') {
+                imageUrl = image;
+            }
+
+            const result = await generationAPI.start({
+                user_id: userData.userId,
+                init_data: userData.initData,
+                model_id: 'seedance/1.0',
+                model_name: 'Seedance 1.0',
+                generation_type: 'video',
+                prompt: prompt.trim(),
+                image_url: imageUrl,
+                parameters: {
+                    mode: mode,
                     duration: `${duration}s`,
                     fps,
                     resolution,
-                    ratio: aspectRatio,
-                    cost: costCredits,
-                    advanced: mode === 'lite_image' ? { cameraType, seed, watermark } : undefined
+                    aspect_ratio: aspectRatio,
+                    ...(mode === 'lite_image' ? { camera_type: cameraType, seed: seed || undefined, watermark } : {}),
+                },
+                idempotency_key: generateIdempotencyKey(),
+            });
+
+            setSuccess(true);
+            triggerNotification('success');
+
+            if (result.new_balance !== undefined && onCreditsUpdate) {
+                onCreditsUpdate(result.new_balance);
+            }
+
+            setTimeout(() => {
+                onOpenProfile();
+            }, 2000);
+
+        } catch (err: any) {
+            console.error('Generation failed:', err);
+            let errorMessage = 'Не удалось запустить генерацию. Попробуйте позже.';
+            
+            if (err.message) {
+                try {
+                    const errorData = JSON.parse(err.message);
+                    errorMessage = errorData.message || errorData.detail || errorMessage;
+                } catch {
+                    errorMessage = err.message || errorMessage;
                 }
-            };
-            window.Telegram.WebApp.sendData(JSON.stringify(payload));
-        }, 2000);
+            }
+            
+            setError(errorMessage);
+            triggerNotification('error');
+        } finally {
+            setIsSubmitting(false);
+        }
     };
 
     return (

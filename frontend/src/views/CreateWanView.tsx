@@ -13,6 +13,7 @@ import { getTelegramUserData, generateIdempotencyKey } from '../utils/generation
 interface CreateWanViewProps {
   userCredits: number;
   onOpenProfile: () => void;
+  onCreditsUpdate?: (newCredits: number) => void;
 }
 
 type WanMode = 'text' | 'image';
@@ -39,7 +40,7 @@ const RATIOS = [
 const BASE_COST_PER_SEC = 0.5; // Credits per second base
 const CREDITS_PER_DOLLAR = 100;
 
-export const CreateWanView: React.FC<CreateWanViewProps> = ({ userCredits, onOpenProfile }) => {
+export const CreateWanView: React.FC<CreateWanViewProps> = ({ userCredits, onOpenProfile, onCreditsUpdate }) => {
     // State
     const [mode, setMode] = useState<WanMode>('text');
     const [prompt, setPrompt] = useState('');
@@ -182,6 +183,11 @@ export const CreateWanView: React.FC<CreateWanViewProps> = ({ userCredits, onOpe
 
             setSuccess(true);
             triggerNotification('success');
+
+            // Update balance if provided
+            if (result.new_balance !== undefined && onCreditsUpdate) {
+                onCreditsUpdate(result.new_balance);
+            }
 
             setTimeout(() => {
                 onOpenProfile();

@@ -12,6 +12,7 @@ import { getTelegramUserData, generateIdempotencyKey } from '../utils/generation
 interface CreateKlingTurboViewProps {
   userCredits: number;
   onOpenProfile: () => void;
+  onCreditsUpdate?: (newCredits: number) => void;
 }
 
 type TurboMode = 'text' | 'image';
@@ -30,7 +31,7 @@ const RATIOS = [
 const PRICE_PER_SEC = 0.0735;
 const CREDITS_PER_DOLLAR = 100;
 
-export const CreateKlingTurboView: React.FC<CreateKlingTurboViewProps> = ({ userCredits, onOpenProfile }) => {
+export const CreateKlingTurboView: React.FC<CreateKlingTurboViewProps> = ({ userCredits, onOpenProfile, onCreditsUpdate }) => {
     const [mode, setMode] = useState<TurboMode>('text');
     const [prompt, setPrompt] = useState('');
     const [negativePrompt, setNegativePrompt] = useState('');
@@ -141,6 +142,11 @@ export const CreateKlingTurboView: React.FC<CreateKlingTurboViewProps> = ({ user
 
             setSuccess(true);
             triggerNotification('success');
+
+            // Update balance if provided
+            if (result.new_balance !== undefined && onCreditsUpdate) {
+                onCreditsUpdate(result.new_balance);
+            }
 
             setTimeout(() => {
                 onOpenProfile();
