@@ -52,15 +52,28 @@ export const ReferralView: React.FC<ReferralViewProps> = ({ onBack, userCredits 
         }
 
         try {
-            const response = await fetch(`${API_URL}/api/user/partner/${userId}`);
-            if (!response.ok) throw new Error('Failed to fetch stats');
+            const url = `${API_URL}/api/user/partner/${userId}`;
+            console.log('Fetching partner stats from:', url);
+            
+            const response = await fetch(url);
+            
+            if (!response.ok) {
+                const errorData = await response.json().catch(() => ({}));
+                console.error('Partner stats API error:', response.status, errorData);
+                throw new Error(errorData.detail || `HTTP ${response.status}: Failed to fetch stats`);
+            }
+            
             const data = await response.json();
+            console.log('Partner stats received:', data);
+            
             setStats(data);
             if (data.saved_card) {
                 setCardNumber(data.saved_card);
             }
-        } catch (e) {
-            setError('Ошибка загрузки данных');
+            setError(null);
+        } catch (e: any) {
+            console.error('Failed to fetch partner stats:', e);
+            setError(e.message || 'Ошибка загрузки данных');
         } finally {
             setLoading(false);
         }
