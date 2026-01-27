@@ -13,61 +13,19 @@ from app.schemas.generation import GenerationRequest, GenerationType
 from app.services.aiml import aiml_client
 from app.services.telegram import telegram_service
 from app.config import settings
+from app.exceptions import (
+    UserNotFoundError,
+    UserBannedError,
+    InsufficientCreditsError,
+    ConcurrentUpdateError,
+    RateLimitError,
+    MaxActiveGenerationsError,
+    DuplicateRequestError,
+    GenerationNotFoundError,
+)
 import structlog
 
 logger = structlog.get_logger()
-
-
-# ========== CUSTOM EXCEPTIONS ==========
-# Inline definitions for now - TODO: move to app/exceptions.py
-
-class AppError(Exception):
-    """Base application error"""
-    def __init__(self, code: str, user_message: str, http_status: int = 400):
-        self.code = code
-        self.user_message = user_message
-        self.http_status = http_status
-        super().__init__(user_message)
-
-class UserNotFoundError(AppError):
-    def __init__(self, user_id: int):
-        super().__init__("USER_NOT_FOUND", "Пользователь не найден", 404)
-
-class UserBannedError(AppError):
-    def __init__(self):
-        super().__init__("USER_BANNED", "Ваш аккаунт заблокирован", 403)
-
-class InsufficientCreditsError(AppError):
-    def __init__(self, required: int, available: int):
-        super().__init__(
-            "INSUFFICIENT_CREDITS",
-            f"Недостаточно кредитов. Нужно {required} 💎, доступно {available} 💎",
-            402
-        )
-
-class ConcurrentUpdateError(AppError):
-    def __init__(self):
-        super().__init__("CONCURRENT_UPDATE", "Попробуйте ещё раз через секунду", 409)
-
-class RateLimitError(AppError):
-    def __init__(self, retry_after: int = 60):
-        super().__init__("RATE_LIMIT_EXCEEDED", f"Слишком много запросов. Подождите {retry_after}с", 429)
-
-class MaxActiveGenerationsError(AppError):
-    def __init__(self, max_allowed: int):
-        super().__init__(
-            "MAX_ACTIVE_GENERATIONS",
-            f"Максимум {max_allowed} активных генераций. Дождитесь завершения.",
-            409
-        )
-
-class DuplicateRequestError(AppError):
-    def __init__(self):
-        super().__init__("DUPLICATE_REQUEST", "Этот запрос уже обрабатывается", 409)
-
-class GenerationNotFoundError(AppError):
-    def __init__(self, generation_id: int):
-        super().__init__("GENERATION_NOT_FOUND", "Генерация не найдена", 404)
 
 
 # ========== CONFIGURATION ==========
@@ -164,6 +122,9 @@ class GenerationService:
         """
         Check if this is a duplicate request.
         Returns existing generation if duplicate, None otherwise.
+        
+        Only checks for active generations (PENDING/PROCESSING).
+        CANCELLED/FAILED/COMPLETED generations can be retried with same key.
         """
         if not idempotency_key:
             return None
@@ -171,6 +132,10 @@ class GenerationService:
         stmt = select(Generation).where(
             Generation.user_id == user_id,
             Generation.idempotency_key == idempotency_key,
+            Generation.status.in_([
+                GenerationStatus.PENDING,
+                GenerationStatus.PROCESSING,
+            ]),
         )
         result = await db.execute(stmt)
         return result.scalar_one_or_none()
