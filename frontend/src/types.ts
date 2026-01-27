@@ -43,6 +43,7 @@ export type AppScreen =
   | 'profile'         // User Profile
   | 'referral'        // Partner/Referral Section
   | 'payment'         // Payment Screen
+  | 'admin'           // Admin Panel
   | 'debug';          // Dev Console
 
 // Bot Payloads

@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { TelegramUser } from '../types';
-import { Gem, Shield, Image as ImageIcon, Video, CreditCard, Users, MessageCircle } from 'lucide-react';
+import { Gem, Shield, Image as ImageIcon, Video, CreditCard, Users, MessageCircle, History, Clock, CheckCircle, XCircle, Loader2 } from 'lucide-react';
 import { triggerHaptic, triggerSelection } from '../utils/haptics';
 import { ModelHeader } from '../components/ModelHeader';
-import { userAPI } from '../utils/api';
+import { userAPI, generationAPI } from '../utils/api';
 
 interface ProfileViewProps {
   user: TelegramUser | null;
@@ -28,6 +28,30 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ user, credits, onNavig
       loadBalance();
     }
   }, [user?.id]);
+
+  const loadHistory = async () => {
+    if (!user?.id || isLoadingHistory) return;
+    
+    setIsLoadingHistory(true);
+    try {
+      const data = await generationAPI.getHistory(user.id, 20, 0);
+      setHistory(data.items || []);
+    } catch (error) {
+      console.error('Failed to load history:', error);
+    } finally {
+      setIsLoadingHistory(false);
+    }
+  };
+
+  const handleHistoryClick = () => {
+    triggerHaptic('light');
+    if (!showHistory) {
+      setShowHistory(true);
+      loadHistory();
+    } else {
+      setShowHistory(false);
+    }
+  };
 
   const loadBalance = async () => {
     if (!user?.id) return;
@@ -153,7 +177,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ user, credits, onNavig
         </div>
 
         {/* 4. Quick Actions */}
-        <div className="grid grid-cols-2 gap-3 mb-8">
+        <div className="grid grid-cols-3 gap-3 mb-8">
             <button 
                 onClick={handleReferralClick}
                 className="bg-[#15151A] border border-[#24242A] p-4 rounded-xl flex flex-col items-center gap-2 hover:border-[#FFD400]/30 active:scale-95 transition-all group"
@@ -162,6 +186,22 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ user, credits, onNavig
                     <Users size={20} />
                 </div>
                 <span className="text-xs font-bold text-white">Партнёрка</span>
+            </button>
+
+            <button 
+                onClick={handleHistoryClick}
+                className={`border p-4 rounded-xl flex flex-col items-center gap-2 hover:border-[#FFD400]/30 active:scale-95 transition-all group ${
+                    showHistory 
+                        ? 'bg-[#FFD400]/10 border-[#FFD400]' 
+                        : 'bg-[#15151A] border-[#24242A]'
+                }`}
+            >
+                <div className={`w-10 h-10 rounded-full bg-[#1A1A1F] flex items-center justify-center transition-colors ${
+                    showHistory ? 'text-[#FFD400]' : 'text-[#A0A0A0] group-hover:text-white'
+                }`}>
+                    <History size={20} />
+                </div>
+                <span className="text-xs font-bold text-white">История</span>
             </button>
 
             <button 
@@ -174,6 +214,65 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ user, credits, onNavig
                 <span className="text-xs font-bold text-white">Поддержка</span>
             </button>
         </div>
+
+        {/* History Section */}
+        {showHistory && (
+            <div className="mb-8 space-y-3">
+                <h3 className="text-[#A0A0A0] text-xs font-bold uppercase tracking-wider">История генераций</h3>
+                {isLoadingHistory ? (
+                    <div className="flex items-center justify-center py-8">
+                        <Loader2 className="w-6 h-6 text-[#FFD400] animate-spin" />
+                    </div>
+                ) : history.length === 0 ? (
+                    <div className="bg-[#15151A] border border-[#24242A] rounded-xl p-8 text-center">
+                        <History className="w-12 h-12 text-[#505055] mx-auto mb-3 opacity-50" />
+                        <p className="text-[#A0A0A0] text-sm">Нет генераций</p>
+                    </div>
+                ) : (
+                    <div className="space-y-2">
+                        {history.map((item) => (
+                            <div key={item.id} className="bg-[#15151A] border border-[#24242A] rounded-xl p-4">
+                                <div className="flex items-start justify-between mb-2">
+                                    <div className="flex-1">
+                                        <div className="text-white font-bold text-sm mb-1">{item.model_name}</div>
+                                        <div className="text-[#A0A0A0] text-xs mb-2 line-clamp-2">{item.prompt}</div>
+                                        <div className="flex items-center gap-3 text-[10px] text-[#505055]">
+                                            <span className="flex items-center gap-1">
+                                                <Clock size={10} />
+                                                {new Date(item.created_at).toLocaleString('ru-RU')}
+                                            </span>
+                                            <span className="flex items-center gap-1">
+                                                <Gem size={10} />
+                                                {item.credits_charged} 💎
+                                            </span>
+                                        </div>
+                                    </div>
+                                    <div className="ml-3">
+                                        {item.status === 'completed' ? (
+                                            <CheckCircle className="w-5 h-5 text-[#22C55E]" />
+                                        ) : item.status === 'failed' ? (
+                                            <XCircle className="w-5 h-5 text-[#FF4D4D]" />
+                                        ) : (
+                                            <Loader2 className="w-5 h-5 text-[#FFD400] animate-spin" />
+                                        )}
+                                    </div>
+                                </div>
+                                {item.result_url && (
+                                    <a
+                                        href={item.result_url}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="text-[#FFD400] text-xs hover:underline"
+                                    >
+                                        Открыть результат →
+                                    </a>
+                                )}
+                            </div>
+                        ))}
+                    </div>
+                )}
+            </div>
+        )}
 
         {/* 5. Top Up Section (Anchored) */}
         <div id="topup-section" className="space-y-4 pt-4 border-t border-[#24242A]">
