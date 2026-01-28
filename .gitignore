@@ -1,1 +1,23 @@
-node_modules
+# Environment Variables (CRITICAL)
+.env
+.env.*
+backend/.env
+frontend/.env
+
+# Dependencies
+node_modules/
+backend/.venv/
+backend/venv/
+backend/__pycache__/
+
+# System
+.DS_Store
+.idea
+.vscode
+*.log
+*.sqlite
+*.sqlite3
+
+# Build
+dist/
+build/
