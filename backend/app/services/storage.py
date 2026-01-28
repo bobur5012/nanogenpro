@@ -2,9 +2,8 @@
 S3-compatible storage service for image uploads.
 """
 import base64
-import imghdr
 import uuid
-from typing import Tuple
+from typing import Tuple, Optional
 
 import boto3
 from botocore.client import Config as BotoConfig
@@ -45,13 +44,21 @@ class StorageService:
         if len(image_bytes) > max_size:
             raise StorageUploadError(f"Image exceeds {settings.max_image_upload_mb}MB limit")
 
-        img_type = imghdr.what(None, h=image_bytes)
+        # Check signature manually (imghdr removed in Py3.13)
+        img_type = None
+        if image_bytes.startswith(b'\xff\xd8\xff'):
+            img_type = "jpeg"
+        elif image_bytes.startswith(b'\x89PNG\r\n\x1a\n'):
+            img_type = "png"
+        elif image_bytes.startswith(b'RIFF') and image_bytes[8:12] == b'WEBP':
+            img_type = "webp"
+
         if img_type == "jpeg":
             ext = "jpg"
         else:
             ext = img_type
 
-        if ext not in ALLOWED_IMAGE_TYPES:
+        if not ext or ext not in ALLOWED_IMAGE_TYPES:
             raise StorageUploadError("Unsupported image type. Use png/jpg/jpeg/webp.")
         return ext
 
@@ -105,6 +112,11 @@ class StorageService:
         return self._build_public_url(key)
 
     def _put_object(self, key: str, body: bytes, content_type: str) -> None:
+        if not self.bucket: 
+            # If no bucket configured, fail gracefully or skip (based on config optionality)
+            # But since upload was called, we expect it to work.
+            raise StorageUploadError("Storage bucket not configured")
+            
         try:
             put_params = {
                 "Bucket": self.bucket,
@@ -112,6 +124,8 @@ class StorageService:
                 "Body": body,
                 "ContentType": content_type,
             }
+            # Only set ACL if not using a private bucket policy that forbids it.
+            # Usually S3 compatible storage supports public-read if configured.
             if settings.storage_public_base_url:
                 put_params["ACL"] = "public-read"
             self.s3.put_object(**put_params)
