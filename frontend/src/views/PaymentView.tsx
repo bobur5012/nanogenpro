@@ -1,8 +1,9 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Copy, Upload, Check, AlertCircle, Loader2, CreditCard, ChevronRight } from 'lucide-react';
+import { Copy, Upload, Check, AlertCircle, Loader2, CreditCard, ChevronRight, ExternalLink } from 'lucide-react';
 import { ModelHeader } from '../components/ModelHeader';
 import { triggerHaptic, triggerNotification } from '../utils/haptics';
 import { userAPI, paymentAPI } from '../utils/api';
+import { openBankingApp } from '../utils/paymentLinks';
 
 interface PaymentViewProps {
     amount: number;       // Credits to buy
@@ -27,7 +28,7 @@ interface CardInfo {
 // UZCARD Logo SVG
 const UzcardLogo = () => (
     <svg width="60" height="20" viewBox="0 0 120 40" fill="none">
-        <rect width="120" height="40" rx="4" fill="#1E40AF"/>
+        <rect width="120" height="40" rx="4" fill="#1E40AF" />
         <text x="10" y="28" fill="white" fontSize="14" fontWeight="bold" fontFamily="Arial">UZCARD</text>
     </svg>
 );
@@ -41,7 +42,7 @@ export const PaymentView: React.FC<PaymentViewProps> = ({ amount: initialAmount,
     const [submitSuccess, setSubmitSuccess] = useState(false);
     const [copied, setCopied] = useState(false);
     const [loading, setLoading] = useState(true);
-    
+
     const fileInputRef = useRef<HTMLInputElement>(null);
     const userId = window.Telegram?.WebApp?.initDataUnsafe?.user?.id;
 
@@ -54,7 +55,7 @@ export const PaymentView: React.FC<PaymentViewProps> = ({ amount: initialAmount,
             const data = await userAPI.getPackages();
             setPackages(data.packages);
             setCard(data.card);
-            
+
             // Select matching or first package
             if (initialAmount && initialPrice) {
                 const match = data.packages.find((p: CreditPackage) => p.credits === initialAmount);
@@ -103,7 +104,7 @@ export const PaymentView: React.FC<PaymentViewProps> = ({ amount: initialAmount,
                 triggerNotification('error');
                 return;
             }
-            
+
             const reader = new FileReader();
             reader.onload = (ev) => {
                 if (ev.target?.result) {
@@ -117,14 +118,14 @@ export const PaymentView: React.FC<PaymentViewProps> = ({ amount: initialAmount,
 
     const handleSubmit = async () => {
         if (!screenshot || !selectedPackage || !userId) return;
-        
+
         setIsSubmitting(true);
         triggerHaptic('medium');
 
         try {
             // Extract base64 data (remove data:image/...;base64, prefix if present)
             const base64Data = screenshot.includes(',') ? screenshot.split(',')[1] : screenshot;
-            
+
             const result = await paymentAPI.topup({
                 user_id: userId,
                 credits: selectedPackage.credits,
@@ -134,7 +135,7 @@ export const PaymentView: React.FC<PaymentViewProps> = ({ amount: initialAmount,
 
             setSubmitSuccess(true);
             triggerNotification('success');
-            
+
             // Note: Balance will be updated after admin approval, not immediately
             // But we can still call the callback if needed for UI consistency
 
@@ -170,7 +171,7 @@ export const PaymentView: React.FC<PaymentViewProps> = ({ amount: initialAmount,
                     <div className="text-center space-y-2">
                         <h2 className="text-xl font-bold text-white">Заявка отправлена!</h2>
                         <p className="text-sm text-[#A0A0A0]">
-                            Ожидайте подтверждения оператором.<br/>
+                            Ожидайте подтверждения оператором.<br />
                             Обычно это занимает 5-30 минут.
                         </p>
                     </div>
@@ -197,7 +198,7 @@ export const PaymentView: React.FC<PaymentViewProps> = ({ amount: initialAmount,
             />
 
             <div className="flex-1 p-5 space-y-6 overflow-y-auto pb-24">
-                
+
                 {/* 1. Package Selection */}
                 <div className="space-y-3">
                     <label className="text-[#A0A0A0] text-xs font-bold uppercase ml-1">Выберите пакет</label>
@@ -209,11 +210,10 @@ export const PaymentView: React.FC<PaymentViewProps> = ({ amount: initialAmount,
                                     triggerHaptic('light');
                                     setSelectedPackage(pkg);
                                 }}
-                                className={`relative p-4 rounded-xl border-2 transition-all active:scale-95 ${
-                                    selectedPackage?.credits === pkg.credits 
-                                        ? 'border-[#FFD400] bg-[#FFD400]/5' 
+                                className={`relative p-4 rounded-xl border-2 transition-all active:scale-95 ${selectedPackage?.credits === pkg.credits
+                                        ? 'border-[#FFD400] bg-[#FFD400]/5'
                                         : 'border-[#24242A] bg-[#15151A] hover:border-[#3A3A40]'
-                                }`}
+                                    }`}
                             >
                                 {pkg.discount > 0 && (
                                     <div className="absolute -top-2 -right-2 bg-[#22C55E] text-white text-[10px] font-bold px-2 py-0.5 rounded-full">
@@ -230,83 +230,77 @@ export const PaymentView: React.FC<PaymentViewProps> = ({ amount: initialAmount,
                     </div>
                 </div>
 
-                {/* 2. Payment Card - Beautiful Design */}
+                {/* 2. Payment Card with Fast Actions */}
                 {card && (
-                    <div className="space-y-3">
-                        <label className="text-[#A0A0A0] text-xs font-bold uppercase ml-1">Карта для оплаты</label>
-                        
+                    <div className="space-y-4">
+                        <label className="text-[#A0A0A0] text-xs font-bold uppercase ml-1">Оплата</label>
+
                         {/* Card Design */}
-                        <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-[#1E40AF] via-[#1E3A8A] to-[#172554] p-5 shadow-xl">
-                            {/* Background Pattern */}
+                        <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-[#1E40AF] via-[#1E3A8A] to-[#172554] p-5 shadow-xl group" onClick={handleCopy}>
+                            {/* ... existing card visuals ... */}
                             <div className="absolute inset-0 opacity-10">
                                 <div className="absolute top-0 right-0 w-40 h-40 bg-white rounded-full blur-3xl transform translate-x-20 -translate-y-20" />
                                 <div className="absolute bottom-0 left-0 w-32 h-32 bg-white rounded-full blur-3xl transform -translate-x-16 translate-y-16" />
                             </div>
-                            
-                            {/* Card Content */}
+
                             <div className="relative z-10 space-y-4">
-                                {/* Logo */}
                                 <div className="flex justify-between items-start">
                                     <UzcardLogo />
-                                    <div className="text-white/60 text-[10px] font-mono">
-                                        {card.type}
+                                    <div className="text-white/60 text-[10px] font-mono">{card.type}</div>
+                                </div>
+                                <div className="pt-4 flex items-center gap-3">
+                                    <span className="text-2xl font-mono text-white tracking-widest">{card.number}</span>
+                                    <div className={`p-2 rounded-lg transition-all ${copied ? 'bg-[#22C55E]/20 text-[#22C55E]' : 'bg-white/10 text-white'}`}>
+                                        {copied ? <Check size={18} /> : <Copy size={18} />}
                                     </div>
                                 </div>
-                                
-                                {/* Card Number */}
-                                <div className="pt-4">
-                                    <div className="flex items-center gap-3">
-                                        <span className="text-2xl font-mono text-white tracking-widest">
-                                            {card.number}
-                                        </span>
-                                        <button 
-                                            onClick={handleCopy} 
-                                            className={`p-2 rounded-lg transition-all active:scale-90 ${
-                                                copied ? 'bg-[#22C55E]/20 text-[#22C55E]' : 'bg-white/10 text-white hover:bg-white/20'
-                                            }`}
-                                        >
-                                            {copied ? <Check size={18} /> : <Copy size={18} />}
-                                        </button>
-                                    </div>
-                                </div>
-                                
-                                {/* Holder */}
                                 <div className="pt-2">
                                     <div className="text-white/40 text-[10px] uppercase tracking-wider mb-1">Получатель</div>
                                     <div className="text-white font-bold tracking-wide">{card.holder}</div>
                                 </div>
                             </div>
                         </div>
-                        
-                        {/* Important Notice */}
-                        <div className="flex items-start gap-3 bg-[#2A1515] p-4 rounded-xl border border-[#441111]">
-                            <AlertCircle size={18} className="text-[#FF4D4D] shrink-0 mt-0.5" />
-                            <div className="text-xs text-[#FF4D4D] leading-relaxed">
-                                <strong>Важно!</strong> В комментарии к платежу укажите ваш ID: 
-                                <span className="inline-block font-mono bg-[#441111] px-2 py-0.5 rounded ml-1 text-white">
-                                    {userId || 'N/A'}
-                                </span>
-                            </div>
+
+                        {/* Fast Pay Buttons */}
+                        <div className="grid grid-cols-2 gap-3">
+                            <button
+                                onClick={() => { handleCopy(); openBankingApp('click'); }}
+                                className="bg-[#007AFF]/10 hover:bg-[#007AFF]/20 border border-[#007AFF]/30 p-3 rounded-xl flex items-center justify-center gap-2 transition-all active:scale-95"
+                            >
+                                <img src="https://upload.wikimedia.org/wikipedia/commons/thumb/e/e2/Click_logo.png/1200px-Click_logo.png" alt="Click" className="h-5" onError={(e) => { e.currentTarget.style.display = 'none' }} />
+                                <span className="text-[#007AFF] font-bold text-sm">Открыть Click</span>
+                                <ExternalLink size={14} className="text-[#007AFF]" />
+                            </button>
+                            <button
+                                onClick={() => { handleCopy(); openBankingApp('payme'); }}
+                                className="bg-[#00CCCC]/10 hover:bg-[#00CCCC]/20 border border-[#00CCCC]/30 p-3 rounded-xl flex items-center justify-center gap-2 transition-all active:scale-95"
+                            >
+                                <span className="text-[#00CCCC] font-bold text-sm">Открыть Payme</span>
+                                <ExternalLink size={14} className="text-[#00CCCC]" />
+                            </button>
                         </div>
+
+                        <p className="text-[10px] text-[#505055] text-center">
+                            *Нажмите, чтобы скопировать карту и открыть приложение
+                        </p>
                     </div>
                 )}
 
                 {/* 3. Screenshot Upload */}
                 <div className="space-y-3">
                     <label className="text-[#A0A0A0] text-xs font-bold uppercase ml-1">Скриншот чека</label>
-                    <div 
+                    <div
                         onClick={handleUploadClick}
-                        className={`w-full border-2 border-dashed rounded-2xl flex flex-col items-center justify-center cursor-pointer transition-all active:scale-[0.98] ${
-                            screenshot 
-                                ? 'border-[#22C55E] bg-[#22C55E]/5 p-3' 
+                        className={`w-full border-2 border-dashed rounded-2xl flex flex-col items-center justify-center cursor-pointer transition-all active:scale-[0.98] ${screenshot
+                                ? 'border-[#22C55E] bg-[#22C55E]/5 p-3'
                                 : 'border-[#24242A] bg-[#15151A] hover:bg-[#1A1A1F] hover:border-[#3A3A40] p-8'
-                        }`}
+                            }`}
                     >
                         {screenshot ? (
                             <div className="relative w-full">
-                                <img 
-                                    src={screenshot} 
-                                    alt="Чек" 
+                                <img
+                                    src={screenshot}
+                                    alt="Чек"
                                     className="w-full h-48 object-cover rounded-xl"
                                 />
                                 <div className="absolute inset-0 bg-black/40 rounded-xl flex items-center justify-center opacity-0 hover:opacity-100 transition-opacity">
