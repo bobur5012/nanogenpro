@@ -4,6 +4,7 @@ Application Configuration
 from pydantic_settings import BaseSettings
 from functools import lru_cache
 from typing import Optional
+from pydantic import Field
 
 
 class Settings(BaseSettings):
@@ -12,7 +13,7 @@ class Settings(BaseSettings):
     debug: bool = False
     
     # ========== DATABASE ==========
-    database_url: str
+    database_url: str = Field(..., validation_alias="DATABASE_URL")
     
     # ========== REDIS ==========
     redis_url: str = "redis://localhost:6379/0"
@@ -22,19 +23,22 @@ class Settings(BaseSettings):
     telegram_webhook_url: Optional[str] = None
     
     # Admin channel for payments/withdrawals review
-    telegram_admin_channel_id: int = -1001234567890  # Replace with real channel ID
+    telegram_admin_channel_id: int = Field(-1001234567890, validation_alias="TELEGRAM_ADMIN_CHANNEL_ID")
     
     # ========== AIML API ==========
     aiml_api_key: str
-    aiml_api_base_url: str = "https://api.aimlapi.com/v2"
+    aiml_api_base_url: str = "https://api.aimlapi.com/v1"
 
     # ========== STORAGE (S3 Compatible) ==========
-    storage_endpoint_url: str
+    # Алиасы под Railway переменные
+    storage_endpoint_url: Optional[str] = Field(None, validation_alias="ENDPOINT")
     storage_region: str = "auto"
-    storage_bucket_name: str
-    storage_access_key_id: str
-    storage_secret_access_key: str
-    storage_public_base_url: Optional[str] = None
+    storage_bucket_name: Optional[str] = Field(None, validation_alias="BUCKET")
+    # Предполагаем, что ID ключа называется ACCESS_KEY либо AWS_ACCESS_KEY_ID, 
+    # но если в Railway его нет в явном виде (обрезан скриншот), добавим alias на всякий случай
+    storage_access_key_id: Optional[str] = Field(None, validation_alias="ACCESS_KEY") 
+    storage_secret_access_key: Optional[str] = Field(None, validation_alias="SECRET_ACCESS_KEY")
+    storage_public_base_url: Optional[str] = Field(None, validation_alias="PUBLIC_URL")
     storage_signed_url_expires: int = 3600  # seconds
     max_image_upload_mb: int = 10
     
@@ -45,8 +49,8 @@ class Settings(BaseSettings):
     secret_key: str
     
     # ========== PAYMENT CARD ==========
-    payment_card_number: str = "8600 3304 8588 5154"
-    payment_card_holder: str = "Botirov Bobur"
+    payment_card_number: str = Field("8600 3304 8588 5154", validation_alias="PAYMENT_CARD_NUMBER")
+    payment_card_holder: str = Field("Botirov Bobur", validation_alias="PAYMENT_CARD_HOLDER")
     payment_card_type: str = "UZCARD"
     
     # ========== PRICING (UZS) ==========
